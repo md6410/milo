@@ -420,7 +420,8 @@ function autoLayout(kids, edges, dims) {
   var colH = {}; ks.forEach(function (c) { colH[c] = cols[c].reduce(function (s2, k) { return s2 + dims[k].h; }, 0) + (cols[c].length - 1) * GY; });
   var H = Math.max.apply(null, ks.map(function (c) { return colH[c]; }).concat([0]));
   ks.forEach(function (c) {
-    var list = cols[c], w = Math.max.apply(null, list.map(function (k) { return dims[k].w; })), y = (H - colH[c]) / 2;
+    /* ستون‌های کناری نیم‌ردیفِ پورت (۱۱) جابه‌جا: پورت‌های روبه‌رو هیچ‌وقت هم‌تراز نیستند و خطِ صافِ خروجِ یکی جلوی دیگری را نمی‌گیرد */
+    var list = cols[c], w = Math.max.apply(null, list.map(function (k) { return dims[k].w; })), y = (H - colH[c]) / 2 + (c % 2 ? 11 : 0);
     xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += 150 + 14 * Math.min(gapN[c] || 0, 24);
   });
   return pos;

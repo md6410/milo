@@ -84,11 +84,28 @@
       L.forEach(function (E, i) { var t = (i + 1) / (L.length + 1); if (vert) E.p.y = Math.round(it.y + it.h * t); else E.p.x = Math.round(it.x + it.w * t); });
     });
   }
-  function reserveStubs(a, b, used, nets) {
-    [a, b].forEach(function (p) { if (p && (p.nx || p.ny)) recordUsed([{ x: p.x, y: p.y }, { x: p.x + p.nx * 20, y: p.y + p.ny * 20 }], used, nets); });
+  /* مسیرِ کشیده‌شده بی‌استثنا ثبت می‌شود (حتی خط‌های هم‌پورت روی آن نمی‌روند)، جز سرِ صافِ کنارِ پورت که جدا رزرو شده */
+  /* شانه: خط‌های یک پورت فقط در امتدادِ صافِ همان پورت می‌توانند با هم بروند و هرکدام در نقطهٔ خودش جدا می‌شود؛
+     قطعهٔ اول/آخرِ مسیر (روی امتدادِ پورت) برای هم‌پورت‌ها آزاد است، بقیهٔ مسیر برای همه ممنوع */
+  function recordRoute(pts, used, sa, sb, nets) {
+    if (pts.length < 2) return;
+    var P = pts.map(function (q) { return { x: q.x, y: q.y }; });
+    function trim(a, b, L) { var d = Math.abs(b.x - a.x) + Math.abs(b.y - a.y); if (d <= L) return false; if (a.x === b.x) a.y += (b.y > a.y ? L : -L); else a.x += (b.x > a.x ? L : -L); return true; }
+    var okA = trim(P[0], P[1], sa || 20); if (!okA) P.shift();
+    var n = P.length, okB = n >= 2 && trim(P[n - 1], P[n - 2], sb || 20); if (n >= 2 && !okB) P.pop();
+    if (P.length < 2) return;
+    /* فقط قطعه‌ای که واقعاً در امتدادِ پورت است آزادِ هم‌پورت‌هاست */
+    var na = nets && okA ? [nets[0]] : null, nb = nets && okB ? [nets[1]] : null;
+    if (P.length === 2) { recordUsed(P, used, okA && okB && nets ? [nets[0], nets[1]] : (na || nb)); return; }
+    recordUsed([P[0], P[1]], used, na);
+    if (P.length > 3) recordUsed(P.slice(1, P.length - 1), used, null);
+    recordUsed([P[P.length - 2], P[P.length - 1]], used, nb);
   }
-  function routeOrtho(a, b, obs, used, nets, hard) {
-    var S = 20, A = { x: a.x + a.nx * S, y: a.y + a.ny * S }, B = { x: b.x + b.nx * S, y: b.y + b.ny * S };
+  function reserveStubs(a, b, used, nets) {
+    [a, b].forEach(function (p) { var L = p && p.stub || 20; if (p && (p.nx || p.ny)) recordUsed([{ x: p.x, y: p.y }, { x: p.x + p.nx * L, y: p.y + p.ny * L }], used, nets); });
+  }
+  function routeOrtho(a, b, obs, used, nets, hard, fine) {
+    var S = a.stub || 20, A = { x: a.x + a.nx * S, y: a.y + a.ny * S }, B = { x: b.x + b.nx * (b.stub || 20), y: b.y + b.ny * (b.stub || 20) };
     var xs = [A.x, B.x], ys = [A.y, B.y], i, j;
     obs.forEach(function (o) { xs.push(o.l, o.r); ys.push(o.t, o.b); });
     xs.sort(function (p, q) { return p - q; }); ys.sort(function (p, q) { return p - q; });
@@ -99,13 +116,13 @@
       for (var q = 0; q < v.length; q++) {
         o.push(v[q]);
         var g = q + 1 < v.length ? v[q + 1] - v[q] : 0;
-        if (g >= 36) { var n = Math.min(12, Math.floor(g / 18)); for (var z = 1; z < n; z++) o.push(Math.round(v[q] + g * z / n)); }
+        if (g >= 36 || (fine && g >= 20)) { var n = fine ? Math.min(40, Math.floor(g / 10)) : Math.min(12, Math.floor(g / 18)); for (var z = 1; z < n; z++) o.push(Math.round(v[q] + g * z / n)); }
       }
       return o;
     }
     xs = lanes(xs); ys = lanes(ys);
     var nx = xs.length, ny = ys.length;
-    if (nx * ny > 40000) return null;
+    if (nx * ny > (fine ? 250000 : 40000)) return null;
     var ix = {}, iy = {}; xs.forEach(function (v, k) { ix[v] = k; }); ys.forEach(function (v, k) { iy[v] = k; });
     var sI = ix[A.x], sJ = iy[A.y], tI = ix[B.x], tJ = iy[B.y];
     var freeMemo = {};
@@ -131,7 +148,7 @@
     var st = { i: sI, j: sJ, d: 4, g: 0, f: hfun(sI, sJ) };
     heap.push(st); best[key(sI, sJ, 4)] = 0;
     var guard = 0;
-    while (heap.size() && guard++ < 90000) {
+    while (heap.size() && guard++ < (fine ? 400000 : 90000)) {
       var cur = heap.pop();
       if (cur.g > (best[key(cur.i, cur.j, cur.d)] != null ? best[key(cur.i, cur.j, cur.d)] : 1e18)) continue;
       if (cur.i === tI && cur.j === tJ) { if (cur.d !== 4 && (b.nx || b.ny) && DIRS[cur.d][0] === b.nx && DIRS[cur.d][1] === b.ny) continue; goal = cur; break; }
@@ -171,7 +188,7 @@
     return o;
   }
   function quickRoute(a, b) { /* مسیرِ سریع هنگامِ کشیدن */
-    var S = 20, A = { x: a.x + a.nx * S, y: a.y + a.ny * S }, B = { x: b.x + b.nx * S, y: b.y + b.ny * S }, pts;
+    var S = a.stub || 20, A = { x: a.x + a.nx * S, y: a.y + a.ny * S }, B = { x: b.x + b.nx * (b.stub || 20), y: b.y + b.ny * (b.stub || 20) }, pts;
     if (a.nx && b.nx) { var mx = (A.x + B.x) / 2; pts = [a, A, { x: mx, y: A.y }, { x: mx, y: B.y }, B, b]; }
     else if (a.ny && b.ny) { var my = (A.y + B.y) / 2; pts = [a, A, { x: A.x, y: my }, { x: B.x, y: my }, B, b]; }
     else if (a.nx) pts = [a, A, { x: A.x, y: B.y }, B, b]; else pts = [a, A, { x: B.x, y: A.y }, B, b];
@@ -205,7 +222,7 @@
     }
   }
   /* مسیرِ یک خط: مستقیم اگر آزاد است؛ وگرنه A* با منعِ هم‌پوشانی؛ اگر راهی نبود، با جریمه؛ آخر از همه مسیرِ ساده */
-  function routeNet(pa, pb, obs, used, nets, skip) {
+  function routeNet(pa, pb, obs, used, nets, skip, fine) {
     var q = quickRoute(pa, pb), ok = true;
     for (var oi = 0; oi < obs.length && ok; oi++) {
       var own = skip && skip.indexOf(oi) >= 0;
@@ -213,7 +230,7 @@
     }
     for (var sj = 1; sj < q.length && ok; sj++) if (collide(q[sj - 1].x, q[sj - 1].y, q[sj].x, q[sj].y, used, nets)) ok = false;
     if (ok) return q;
-    var H = routeOrtho(pa, pb, obs, used, nets, true);
+    var H = routeOrtho(pa, pb, obs, used, nets, true) || (fine ? routeOrtho(pa, pb, obs, used, nets, true, true) : null); /* شبکهٔ ریز فقط برای خطِ گیرکرده در دورِ آخر */
     if (H) return H;
     var soft = routeOrtho(pa, pb, obs, used, nets, false) || q; soft.soft = true; return soft;
   }
@@ -327,23 +344,19 @@
       var pa = l.fromPort ? portAnchor(a, 'out', l.fromPort) : (l.fa ? anchorAt(a, l.fa) : null), pb = l.toPort ? portAnchor(b, 'in', l.toPort) : (l.ta ? anchorAt(b, l.ta) : null);
       var ca = { x: b.x + b.w / 2, y: b.y + b.h / 2 }, cb = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
       /* پیوندِ دوطرفه از لبه‌ای بیرون می‌آید که رو به بلوکِ دیگر است (همان ردیفِ پورت)؛ دورِ نقشه نمی‌چرخد */
-      if (l.both && !l.noFlip) {
-        var flip = function (p, it, ot) { if (!p || !p.nx) return p; var oc = ot.x + ot.w / 2; if (p.nx > 0 && oc < it.x) return { x: it.x, y: p.y + 11, nx: -1, ny: 0 }; if (p.nx < 0 && oc > it.x + it.w) return { x: it.x + it.w, y: p.y + 11, nx: 1, ny: 0 }; return p; }; /* +۱۱: میانِ ردیف‌های پورتِ آن لبه، نه روی پورتِ دیگری */
-        pa = flip(pa, a, b); pb = flip(pb, b, a);
-      }
       if (!pa) pa = anchor(a, pb ? pb.x : ca.x, pb ? pb.y : ca.y);
       if (!pb) pb = anchor(b, pa.x, pa.y);
       return { a: pa, b: pb, from: a, to: b };
     }
     /* هم‌شبکه = سرِ دقیقاً یکسان (شاخه‌شدنِ واقعی از یک نقطه)؛ دو خط که فقط به یک شکل می‌رسند هم‌شبکه نیستند */
     function netsOf(l) { var e = (C.ep && C.ep[l.id]) || endpoints(l); if (!e) return []; return ['p' + Math.round(e.a.x) + ',' + Math.round(e.a.y), 'p' + Math.round(e.b.x) + ',' + Math.round(e.b.y)]; }
-    function routeLink(l, quick, obs, used) {
+    function routeLink(l, quick, obs, used, fine) {
       var e = (!quick && C.ep && C.ep[l.id]) || endpoints(l); if (!e) return null;
       var pts = null;
       if (!quick && o.route !== false) {
         var fi = -1, ti = -1;
         for (var z = 0; z < C.items.length; z++) { if (C.items[z].id === l.from) fi = z; if (C.items[z].id === l.to) ti = z; }
-        pts = routeNet(e.a, e.b, obs, used, netsOf(l), [fi, ti]);
+        pts = routeNet(e.a, e.b, obs, used, netsOf(l), [fi, ti], fine);
       }
       if (!pts) pts = quickRoute(e.a, e.b);
       return { pts: pts, d: toPath(pts), mid: midOf(pts) };
@@ -392,7 +405,7 @@
       /* خط‌های کوتاه‌تر اول: مسیرِ مستقیم مالِ آن‌هاست و خط‌های بلند دورشان می‌گردند */
       var order = C.links.slice(), len = {}, EP = {}, ends = [];
       order.forEach(function (l) {
-        var e = endpoints(l); if (!e) return; EP[l.id] = e;
+        var e = endpoints(l); if (!e) return; EP[l.id] = e; e.a.stub = e.b.stub = o.stub || 32; /* خطِ صافِ اول از هر پورت */
         len[l.id] = Math.abs(e.a.x - e.b.x) + Math.abs(e.a.y - e.b.y);
         ends.push({ it: e.from, p: e.a, o: e.b, fixed: !!(l.fromPort || l.fa) }, { it: e.to, p: e.b, o: e.a, fixed: !!(l.toPort || l.ta) });
       });
@@ -401,17 +414,17 @@
       order.sort(function (x, y) { return len[x.id] - len[y.id]; });
       /* سرِ کوتاهِ هر خط کنارِ پورتش از پیش رزرو می‌شود تا هیچ خطِ دیگری از رویش رد نشود.
          اگر خطی راهِ بی‌هم‌پوشانی پیدا نکرد، دوباره چیده می‌شود و این بار آن خط اول می‌رود (تا ۴ دور؛ بهترین دور می‌ماند) */
-      var best = null;
+      var best = null, fs0 = {};
       for (var pass = 0; pass < (quick || only ? 1 : 4); pass++) {
         used = []; var geo = {}, failed = [];
         if (!quick) order.forEach(function (l) { var e = EP[l.id]; if (e) reserveStubs(e.a, e.b, used, netsOf(l)); });
         order.forEach(function (l) {
-          if (only && !only[l.from] && !only[l.to]) { if (C.geo[l.id]) { geo[l.id] = C.geo[l.id]; if (!quick) recordUsed(C.geo[l.id].pts, used, netsOf(l)); } return; }
-          var g = routeLink(l, quick, obs, used); if (g) { geo[l.id] = g; if (g.pts.soft) failed.push(l); if (!quick) recordUsed(g.pts, used, netsOf(l)); }
+          if (only && !only[l.from] && !only[l.to]) { if (C.geo[l.id]) { geo[l.id] = C.geo[l.id]; if (!quick) recordRoute(C.geo[l.id].pts, used, o.stub || 32, o.stub || 32, netsOf(l)); } return; }
+          var g = routeLink(l, quick, obs, used, pass > 0 && fs0[l.id]); if (g) { geo[l.id] = g; if (g.pts.soft) failed.push(l); if (!quick) { var ee = EP[l.id]; recordRoute(g.pts, used, ee ? ee.a.stub : 20, ee ? ee.b.stub : 20, netsOf(l)); } }
         });
         if (!best || failed.length < best.failed.length) best = { geo: geo, failed: failed };
         if (!failed.length) break;
-        var fs = {}; failed.forEach(function (l) { fs[l.id] = 1; });
+        var fs = {}; failed.forEach(function (l) { fs[l.id] = 1; fs0[l.id] = 1; });
         order = failed.concat(order.filter(function (l) { return !fs[l.id]; }));
       }
       C.geo = best.geo;
@@ -714,5 +727,5 @@
     });
     return Math.max(1, n);
   }
-  W.PMCanvas = { textWidth: textWidth, lineCount: lineCount, anchorAt: anchorAt, create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, routeNet: routeNet, reserveStubs: reserveStubs, spreadAnchors: spreadAnchors, recordUsed: recordUsed, placeLabels: placeLabels, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
+  W.PMCanvas = { textWidth: textWidth, lineCount: lineCount, anchorAt: anchorAt, create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, routeNet: routeNet, reserveStubs: reserveStubs, recordRoute: recordRoute, spreadAnchors: spreadAnchors, recordUsed: recordUsed, placeLabels: placeLabels, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
 })(window);

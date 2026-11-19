@@ -36,6 +36,9 @@
       if (lines <= (shape === 'diamond' ? 3 : 3) || W >= maxW) break;
       W += 10;
     }
+    /* واژهٔ بلندتر از پهنا (مثلِ کد) در مرورگر گاهی یک سطر بیشتر می‌شکند: یک سطرِ ذخیره */
+    var iw = innerW(shape, W) - 6, longW = String(text).split(/\s+/).some(function (wd) { return CV.textWidth(wd, font) > iw; });
+    if (longW) lines += 1;
     var H = Math.ceil(outerH(shape, lines * LH + extra + 6)), ch = false;
     if (W > n.w) { n.x = Math.round(n.x - (W - n.w) / 2); n.w = W; ch = true; }
     if (H > n.h) { n.h = H; ch = true; }
@@ -43,7 +46,7 @@
   }
   /* هر شکلی که روی شکلِ دیگری افتاده، به پایین هل داده می‌شود (ترتیب و ستون‌ها حفظ می‌شود) */
   function separate(nodes, gap) {
-    gap = gap == null ? 50 : gap; /* ۵۰: جای سرِ پیکان (۲۰) + حاشیهٔ شکل (۱۴) + راهرو */
+    gap = gap == null ? 70 : gap; /* ۷۰: دو خطِ صافِ خروج/ورود (۲۴) + راهرو */
     var L = nodes.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }), moved = false;
     for (var i = 1; i < L.length; i++) {
       var b = L[i], again = true, guard = 0;
@@ -78,11 +81,12 @@
     var ends = []; R.forEach(function (r) { var a = by[r.e.from], b = by[r.e.to], sa = (TYPES[a.type] || TYPES.process).shape, sb = (TYPES[b.type] || TYPES.process).shape;
       ends.push({ it: { id: a.id, x: a.x, y: a.y, w: a.w, h: a.h, shape: sa }, p: r.pa, o: r.pb, fixed: !!r.e.fa }, { it: { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: sb }, p: r.pb, o: r.pa, fixed: !!r.e.ta }); });
     CV.spreadAnchors(ends);
+    R.forEach(function (r) { r.pa.stub = r.pb.stub = 24; });
     R.forEach(function (r) { r.nets = ['p' + Math.round(r.pa.x) + ',' + Math.round(r.pa.y), 'p' + Math.round(r.pb.x) + ',' + Math.round(r.pb.y)]; });
     R.sort(function (x, y) { return x.len - y.len; });
     R.forEach(function (r) { CV.reserveStubs(r.pa, r.pb, used, r.nets); });
     var soft = 0;
-    R.forEach(function (r) { r.pts = CV.routeNet(r.pa, r.pb, obs, used, r.nets, [idx[r.e.from], idx[r.e.to]]); if (r.pts.soft) soft++; CV.recordUsed(r.pts, used, r.nets); });
+    R.forEach(function (r) { r.pts = CV.routeNet(r.pa, r.pb, obs, used, r.nets, [idx[r.e.from], idx[r.e.to]]); if (r.pts.soft) soft++; CV.recordRoute(r.pts, used, 24, 24, r.nets); });
     return { R: R, soft: soft };
   }
   /* اگر پیکانی جای تمیز ندارد، شکل‌ها از مرکز باز می‌شوند (×۱٫۳، حداکثر ۴ بار) تا هر خط راهروی خودش را بیابد */
@@ -304,7 +308,7 @@
       commit(); render(false);
     }
     var cnt = 0;
-    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO, freePoints: true, fitSide: 215,
+    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO, freePoints: true, fitSide: 215, stub: 24,
       onMove: function (list) { list.forEach(function (m) { var n = nodeById(m.id); if (n) { n.x = m.x; n.y = m.y; } }); commit(); },
       onAdd: function (p) { addNode('process', p.x, p.y, true); },
       onConnect: function (a, b, pa, pb, fa, ta) { addEdge(a.id, b.id, fa, ta); },
