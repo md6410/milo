@@ -48,9 +48,20 @@ class Node:
         self.fin = []   # (port, child, label) فقط در فلوچارت
         self.fout = []  # (child, port, label)
         self.steps = None
+        self.tests = []   # تست‌های این گره: [{ref,title,port,state,given,expect_kind,expect,min,max,unit,kind,priority,source}]
         if parent is not None:
             parent.children.append(self)
         doc.nodes.append(self)
+
+    def add_test(self, title, port='', state='', given='', expect='', kind='unit', expect_kind='value', min=None, max=None, unit='', ref='', priority=2, source=''):
+        """تست برای همین گره: «با این ورودی/پورت و در این حالت، جواب باید این مقدار (یا این بازه) باشد»."""
+        t = {'title': title, 'port': port, 'state': state, 'given': given, 'expect_kind': expect_kind, 'expect': expect, 'kind': kind, 'priority': priority, 'ref': ref, 'source': source}
+        if expect_kind == 'range':
+            t['min'] = min; t['max'] = max; t['unit'] = unit
+        elif unit:
+            t['unit'] = unit
+        self.tests.append(t)
+        return t
 
     # ---- ساختنِ زیرمجموعه
     def section(self, title, icon='📂', **kw):
@@ -258,7 +269,7 @@ def export(doc, slug, title):
             'summary': n.summary, 'details': n.details, 'process': n.process, 'tech': n.tech,
             'inputs': _ports(n.ins), 'outputs': _ports(n.outs), 'icon': n.icon, 'color': n.color,
             'est_days': n.est, 'tags': n.tags, 'priority': 2, 'status': 'todo', 'progress': 0,
-            'flow': n.flow, 'src_name': n.src_name, 'x': n.x, 'y': n.y})
+            'flow': n.flow, 'src_name': n.src_name, 'x': n.x, 'y': n.y, **({'tests': n.tests} if n.tests else {})})
         for port, child, cp in n.bin:
             deps.append({'from': n.id, 'to': child.id, 'bnd': 'in', 'out': port, 'in': cp, 'label': ''})
         for child, cp, port in n.bout:

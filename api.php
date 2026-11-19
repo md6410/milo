@@ -142,7 +142,7 @@ try {
             if (pm_proj_kind($db, $pid) === 'library') fail('کتابخانهٔ ماژول‌ها پاک نمی‌شود');
             $needProject();
             pm_delete_files($db, 'project_id=?', [$pid]);
-            foreach (['deps', 'milestones', 'logs', 'nodes', 'changes', 'revisions'] as $t) $db->prepare("DELETE FROM $t WHERE project_id=?")->execute([$pid]);
+            foreach (['deps', 'milestones', 'logs', 'tests', 'nodes', 'changes', 'revisions'] as $t) $db->prepare("DELETE FROM $t WHERE project_id=?")->execute([$pid]);
             $db->prepare('DELETE FROM projects WHERE id=?')->execute([$pid]);
             out(['ok' => true]);
 
@@ -154,6 +154,7 @@ try {
                 'nodes' => array_map('pm_node_out', $q('SELECT * FROM nodes WHERE project_id=? ORDER BY sort,id')),
                 'deps' => $q('SELECT * FROM deps WHERE project_id=? ORDER BY id'),
                 'milestones' => $q('SELECT * FROM milestones WHERE project_id=? ORDER BY date,id'),
+                'test_stats' => (object)pm_test_stats($db, $pid),
                 'logs' => $q('SELECT * FROM logs WHERE project_id=? ORDER BY created_at DESC, id DESC LIMIT 3000'),
                 'files' => $q('SELECT id,project_id,node_id,log_id,name,mime,size,created_at FROM files WHERE project_id=? ORDER BY id'),
                 'changes' => $q('SELECT * FROM changes WHERE project_id=? ORDER BY id DESC LIMIT 150'),
@@ -242,6 +243,73 @@ try {
             pm_chg($db, $dstPid, $r['id'], 'درج ماژول از کتابخانه/رونوشت', $r['count'] . ' بخش', $author);
             $db->prepare('UPDATE projects SET updated_at=? WHERE id=?')->execute([$now, $dstPid]);
             out(['id' => $r['id'], 'count' => $r['count']]);
+
+
+        // ---- تست‌ها
+        case 'tests':   // project_id, node_id? (با sub=1 زیرمجموعه هم)، status?, q?, kind?, limit, offset
+            $needProject();
+            $w = ['project_id=?']; $a = [$pid];
+            $nid = (int)($in['node_id'] ?? 0);
+            if ($nid) {
+                $ids = !empty($in['sub']) ? array_merge([$nid], pm_subtree($db, $pid, $nid)) : [$nid];
+                $w[] = 'node_id IN (' . implode(',', array_map('intval', $ids)) . ')';
+            }
+            if (!empty($in['status']) && isset(PM_TEST_STATUS[$in['status']])) { $w[] = 'status=?'; $a[] = $in['status']; }
+            if (!empty($in['kind']) && isset(PM_TEST_KINDS[$in['kind']])) { $w[] = 'kind=?'; $a[] = $in['kind']; }
+            $qs = trim((string)($in['q'] ?? ''));
+            if ($qs !== '') { $w[] = '(title LIKE ? OR ref LIKE ? OR port LIKE ? OR state LIKE ? OR given LIKE ? OR expect LIKE ?)'; for ($i = 0; $i < 6; $i++) $a[] = '%' . $qs . '%'; }
+            $cond = implode(' AND ', $w);
+            $c = $db->prepare("SELECT COUNT(*) FROM tests WHERE $cond"); $c->execute($a);
+            $total = (int)$c->fetchColumn();
+            $lim = max(1, min(500, (int)($in['limit'] ?? 100))); $off = max(0, (int)($in['offset'] ?? 0));
+            $st = $db->prepare("SELECT * FROM tests WHERE $cond ORDER BY node_id, sort, id LIMIT $lim OFFSET $off"); $st->execute($a);
+            $sum = $db->prepare("SELECT status, COUNT(*) n FROM tests WHERE project_id=? GROUP BY status"); $sum->execute([$pid]);
+            out(['total' => $total, 'tests' => array_map('pm_test_out', $st->fetchAll()), 'summary' => $sum->fetchAll(PDO::FETCH_KEY_PAIR)]);
+
+        case 'tests_all':  // برای خروجی: همهٔ تست‌های پروژه
+            $needProject();
+            $st = $db->prepare('SELECT * FROM tests WHERE project_id=? ORDER BY node_id, sort, id'); $st->execute([$pid]);
+            out(['tests' => array_map('pm_test_out', $st->fetchAll())]);
+
+        case 'test_save':    // node_id، id? و فیلدها
+            $needProject();
+            $nid = (int)($in['node_id'] ?? 0);
+            $q = $db->prepare('SELECT title FROM nodes WHERE id=? AND project_id=?'); $q->execute([$nid, $pid]);
+            $nt = $q->fetchColumn();
+            if ($nt === false) fail('بخش پیدا نشد', 404);
+            $isNew = empty($in['id']);
+            $tid = pm_test_put($db, $pid, $nid, $in, $author, true);
+            pm_chg($db, $pid, $nid, $isNew ? 'تستِ تازه' : 'ویرایشِ تست', pm_str($in['title'] ?? '', 120), $author);
+            $r = $db->prepare('SELECT * FROM tests WHERE id=?'); $r->execute([$tid]);
+            out(['test' => pm_test_out($r->fetch())]);
+
+        case 'test_delete':
+            $needProject();
+            $tid = (int)($in['id'] ?? 0);
+            $q = $db->prepare('SELECT node_id,title FROM tests WHERE id=? AND project_id=?'); $q->execute([$tid, $pid]);
+            $t = $q->fetch();
+            if (!$t) fail('تست پیدا نشد', 404);
+            $db->prepare('DELETE FROM tests WHERE id=?')->execute([$tid]);
+            pm_chg($db, $pid, (int)$t['node_id'], 'حذفِ تست', pm_str($t['title'], 120), $author);
+            out(['ok' => true]);
+
+        case 'test_status':   // ids[] یا id + status (+ note). ثبتِ نتیجهٔ اجرا
+            $needProject();
+            $ids = array_values(array_filter(array_map('intval', is_array($in['ids'] ?? null) ? $in['ids'] : [$in['id'] ?? 0])));
+            $stt = (string)($in['status'] ?? '');
+            if (!isset(PM_TEST_STATUS[$stt]) || !$ids) fail('وضعیت یا تست نامعتبر');
+            $now = pm_now();
+            $up = $db->prepare('UPDATE tests SET status=?, last_at=?, last_by=?, last_note=?, updated_at=? WHERE id=? AND project_id=?');
+            foreach ($ids as $tid) $up->execute([$stt, $now, $author, pm_str($in['note'] ?? '', 1000), $now, $tid, $pid]);
+            out(['ok' => true, 'count' => count($ids)]);
+
+        case 'test_reset':    // همهٔ نتیجه‌ها (یا فقط یک گره و زیرمجموعه) را «اجرا نشده» کن
+            $needProject();
+            $nid = (int)($in['node_id'] ?? 0);
+            $cond = '';
+            if ($nid) { $ids = array_merge([$nid], pm_subtree($db, $pid, $nid)); $cond = ' AND node_id IN (' . implode(',', array_map('intval', $ids)) . ')'; }
+            $db->prepare("UPDATE tests SET status='untested', last_at=NULL, last_by='', last_note='' WHERE project_id=?$cond")->execute([$pid]);
+            out(['ok' => true]);
 
         // ---- نسخه‌ها (ذخیره / بازگردانی)
         case 'revision_save':

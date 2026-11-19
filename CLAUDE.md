@@ -16,3 +16,5 @@
 
 - `library/*.pm.json` is generated: edit `tools/library/*.py`, run `python3 tools/library/build.py` (also rewrites the auto section of `deploy-files.txt`)
   and `node tools/library/check.js library/*.pm.json` (must report no unused ports). API: `bundled_catalog` / `bundled_import`.
+- Tests (schema v6, table `tests`): API `tests`/`tests_all`/`test_save`/`test_delete`/`test_status`/`test_reset`; `node.tests` in the `.pm.json` contract (match by `ref`). Define/edit/delete are gated by `MUT` (tadd/tedit/tdel); recording a result is not.
+- Weby tests are mined by `tools/library/wtests.py` (+ `wmap.py` file→module rules, `wattach.py`); Invora's are in `tools/library/itests.py`. Rebuild projects with `python3 tools/library/build.py`.

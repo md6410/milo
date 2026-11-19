@@ -235,7 +235,7 @@ function menuBar() {
     '<div class="mb-title">' + (inP ? (isLib() ? '📚 ' : '') + esc(p.project.name) + ' <span class="pill">' + FA(p.project.progress) + '٪</span>' : '') + '</div><div class="mb-right"><span class="mb-user">👤 ' + esc(S.user || '') + '</span></div></header>';
 }
 var TABS = [['dash', '📊', 'داشبورد', '#2f6fed'], ['map', '🗺️', 'ساختار', '#7a5af8'], ['outline', '📋', 'فهرست', '#14a3a3'], ['plan', '🧭', 'ترتیب و زمان‌بندی', '#e0912b'],
-  ['gantt', '📅', 'تایم‌لاین', '#d64545'], ['logs', '📝', 'گزارش‌ها', '#1f9d63'], ['hist', '🕘', 'تاریخچه', '#64748b'], ['ai', '🤖', 'هوش مصنوعی', '#e0558a']];
+  ['gantt', '📅', 'تایم‌لاین', '#d64545'], ['logs', '📝', 'گزارش‌ها', '#1f9d63'], ['tests', '🧪', 'تست‌ها', '#0ea5e9'], ['hist', '🕘', 'تاریخچه', '#64748b'], ['ai', '🤖', 'هوش مصنوعی', '#e0558a']];
 function tabsBar() {
   var ed = S.editing;
   return '<nav class="tabs">' + TABS.map(function (t) { return '<div class="tab ' + (S.tab === t[0] ? 'on' : '') + '" style="--tc:' + t[3] + '" data-act="tab" data-v="' + t[0] + '"><span class="tab-i">' + t[1] + '</span> ' + t[2] + '</div>'; }).join('') +
@@ -258,11 +258,12 @@ function renderContent(keep) {
   var mn = $('.main'); if (mn) mn.classList.toggle('overlay', S.tab === 'map');
   var sc = {};
   if (keep) { $$('[data-sk]', c).forEach(function (e) { sc[e.getAttribute('data-sk')] = [e.scrollLeft, e.scrollTop]; }); sc.win = window.scrollY; }
-  var fn = { dash: dashView, map: mapView, outline: outlineView, plan: planView, gantt: ganttView, logs: logsView, hist: histView, ai: aiView }[S.tab] || dashView;
+  var fn = { dash: dashView, map: mapView, outline: outlineView, plan: planView, gantt: ganttView, logs: logsView, tests: testsView, hist: histView, ai: aiView }[S.tab] || dashView;
   c.innerHTML = fn();
   if (keep) { $$('[data-sk]', c).forEach(function (e) { var s = sc[e.getAttribute('data-sk')]; if (s) { e.scrollLeft = s[0]; e.scrollTop = s[1]; } }); window.scrollTo(0, sc.win || 0); }
   if (S.tab === 'gantt' && !keep) { var g = $('.gscroll'); if (g && S._gToday != null) g.scrollLeft = Math.max(0, S._gToday - 160); }
   if (S.tab === 'ai') bindAi();
+  if (S.tab === 'tests') bindTests();
   if (S.tab === 'map') mountMap();
   var tb = $('.tabs'); if (tb) tb.outerHTML = tabsBar();
 }
@@ -716,6 +717,113 @@ function taskPage(n) {
     '<div class="card"><h2 class="sec">📝 یادداشت‌ها</h2>' + logForm(n.id) + '<div style="margin-top:10px">' + (logs.map(function (l) { return logHtml(l, false); }).join('') || '<div class="mut sm">هنوز یادداشتی نیست.</div>') + '</div></div></div>';
 }
 
+
+/* ---------- تست‌ها ---------- */
+var TK = { unit: 'واحد', integration: 'یکپارچگی', e2e: 'سرتاسری', manual: 'دستی', security: 'امنیتی', perf: 'کارایی' };
+var TX = { value: 'برابر مقدار', range: 'در بازه', contains: 'شامل متن', 'true': 'درست باشد', 'false': 'نادرست باشد', error: 'خطا بدهد', any: 'شرحِ آزاد' };
+var TS = { untested: 'اجرا نشده', pass: 'موفق', fail: 'ناموفق', skip: 'ردشده' };
+var TSC = { untested: '#94a0b8', pass: '#1f9d63', fail: '#d64545', skip: '#e0912b' };
+function testBadge(id) {
+  var st = S.P && S.P.test_stats ? S.P.test_stats[id] : null; if (!st) return '';
+  return '<span class="pill s" title="' + FA(st.n) + ' تست — موفق ' + FA(st.pass) + '، ناموفق ' + FA(st.fail) + '" style="' + (st.fail ? 'background:#fde8e8;color:#b42318' : st.pass === st.n ? 'background:#e1f5ea;color:#16794a' : '') + '">🧪 ' + FA(st.n) + '</span>';
+}
+function testExpect(t) {
+  if (t.expect_kind === 'range') return '<b class="ltr">' + FA(t.min == null ? '−∞' : t.min) + ' … ' + FA(t.max == null ? '+∞' : t.max) + '</b>' + (t.unit ? ' ' + esc(t.unit) : '');
+  if (t.expect_kind === 'true' || t.expect_kind === 'false' || t.expect_kind === 'error') return '<b>' + TX[t.expect_kind] + '</b>' + (t.expect ? ': ' + esc(t.expect) : '');
+  return (t.expect_kind === 'contains' ? 'شامل ' : '') + '<b>' + esc(t.expect || '—') + '</b>' + (t.unit ? ' ' + esc(t.unit) : '');
+}
+function testRow(t, withNode) {
+  S._tcache = S._tcache || {}; S._tcache[t.id] = t;
+  var ed = S.editing;
+  return '<div class="trow" style="border:1px solid var(--bd,#dfe3ec);border-inline-start:4px solid ' + TSC[t.status] + ';border-radius:8px;padding:8px 10px;margin-bottom:6px;background:var(--card,#fff)">' +
+    '<div class="row" style="align-items:flex-start;flex-wrap:nowrap"><input type="checkbox" data-tsel="' + t.id + '" style="margin-top:5px">' +
+    '<div class="grow"><div><span class="pill s" style="background:' + TSC[t.status] + '22;color:' + TSC[t.status] + '">' + TS[t.status] + '</span> ' + (t.ref ? '<code class="ltr sm">' + esc(t.ref) + '</code> ' : '') + '<b>' + esc(t.title) + '</b> <span class="pill s">' + TK[t.kind] + '</span></div>' +
+    (withNode && S.idx.byId.has(t.node_id) ? '<div class="sm mut"><a class="tt" data-act="tpick" data-id="' + t.node_id + '" style="cursor:pointer">' + esc(S.idx.pathText(t.node_id)) + '</a></div>' : '') +
+    '<div class="sm" style="margin-top:3px">' + (t.port ? '⇢ پورت: <b>' + esc(t.port) + '</b> · ' : '') + (t.state ? 'حالت: <b>' + esc(t.state) + '</b>' : '') + '</div>' +
+    (t.given ? '<div class="sm mut" style="white-space:pre-wrap;word-break:break-word">ورودی: ' + esc(t.given) + '</div>' : '') +
+    '<div class="sm" style="margin-top:2px">انتظار: ' + testExpect(t) + '</div>' +
+    (t.last_at ? '<div class="sm mut">آخرین اجرا: ' + esc(t.last_at) + (t.last_by ? ' · ' + esc(t.last_by) : '') + (t.last_note ? ' — ' + esc(t.last_note) : '') + '</div>' : '') + '</div>' +
+    '<div class="row" style="gap:3px;flex-wrap:nowrap"><button class="btn sm" title="موفق" data-act="tstat" data-id="' + t.id + '" data-v="pass">✓</button><button class="btn sm" title="ناموفق" data-act="tstat" data-id="' + t.id + '" data-v="fail">✗</button><button class="btn sm" title="رد" data-act="tstat" data-id="' + t.id + '" data-v="skip">⏭</button>' +
+    (ed ? '<button class="btn sm ghost" title="ویرایش" data-act="tedit" data-id="' + t.id + '">✎</button><button class="btn sm ghost" title="حذف" data-act="tdel" data-id="' + t.id + '">🗑</button>' : '') + '</div></div></div>';
+}
+function afterTestChange() {
+  return loadProject(S.pid).then(function () {
+    if (S.tab === 'tests') return loadTests().then(function () { renderDrawer(); });
+    renderContent(true); renderDrawer();
+  });
+}
+function loadNodeTests(id) {
+  var box = $('#dtests'); if (!box || !id) return;
+  return api('tests', { project_id: S.pid, node_id: id, limit: 200 }).then(function (j) {
+    var b = $('#dtests'); if (!b || S.sel !== id) return;
+    b.innerHTML = '<h4>🧪 تست‌ها <span class="mut sm">(' + FA(j.total) + ')</span></h4>' + (j.tests.map(function (t) { return testRow(t, false); }).join('') || '<div class="mut sm">تستی تعریف نشده. هر تست می‌گوید «با این ورودی و در این حالت، جواب باید این مقدار یا این بازه باشد».</div>') +
+      '<div class="row" style="margin-top:6px">' + (S.editing ? '<button type="button" class="btn sm" data-act="tadd" data-node="' + id + '">＋ تستِ تازه</button>' : '<span class="mut sm">برای تعریفِ تست «✎ ویرایش» را بزنید؛ ثبتِ نتیجه (✓ ✗) همیشه ممکن است.</span>') + '</div>';
+  });
+}
+function testDialog(nodeId, t) {
+  t = t || { expect_kind: 'value', kind: 'unit', priority: 2 };
+  var n = S.idx.byId.get(nodeId); if (!n) return;
+  var ports = (n.inputs || []).map(function (p) { return ['⇢ ' + p.name, p.name]; }).concat((n.outputs || []).map(function (p) { return ['⇠ ' + p.name, p.name]; }));
+  var opt = function (map, cur) { return Object.keys(map).map(function (k) { return '<option value="' + k + '"' + (cur === k ? ' selected' : '') + '>' + map[k] + '</option>'; }).join(''); };
+  var body = '<label class="f"><span>عنوانِ تست</span><input name="title" value="' + esc(t.title || '') + '" required placeholder="مثلاً: سبدِ خالی نباید به پرداخت برود"></label>' +
+    '<div class="row"><label class="f grow"><span>ورودی/خروجیِ موردِ آزمون (پورت)</span><input name="port" list="tports" value="' + esc(t.port || '') + '" placeholder="اختیاری"><datalist id="tports">' + ports.map(function (p) { return '<option value="' + esc(p[1]) + '">' + esc(p[0]); }).join('') + '</datalist></label>' +
+    '<label class="f grow"><span>شناسهٔ تست (ref)</span><input name="ref" class="ltr" value="' + esc(t.ref || '') + '" placeholder="مثلاً CS-01"></label></div>' +
+    '<label class="f"><span>حالت (در چه وضعیتی؟)</span><input name="state" value="' + esc(t.state || '') + '" placeholder="مثلاً توکن منقضی شده / کاربر مهمان / موجودی صفر"></label>' +
+    '<label class="f"><span>ورودیِ نمونه</span><textarea name="given" style="min-height:60px">' + esc(t.given || '') + '</textarea></label>' +
+    '<div class="row"><label class="f grow"><span>نوعِ نتیجهٔ مورد انتظار</span><select name="expect_kind">' + opt(TX, t.expect_kind) + '</select></label>' +
+    '<label class="f grow"><span>نوعِ تست</span><select name="kind">' + opt(TK, t.kind) + '</select></label>' +
+    '<label class="f" style="width:100px"><span>اولویت</span><select name="priority">' + [1, 2, 3].map(function (k) { return '<option value="' + k + '"' + (t.priority === k ? ' selected' : '') + '>' + E.PRIO[k] + '</option>'; }).join('') + '</select></label></div>' +
+    '<label class="f" data-tx="val"><span>جوابِ مورد انتظار (مقدار/متن/توضیح)</span><textarea name="expect" style="min-height:56px">' + esc(t.expect || '') + '</textarea></label>' +
+    '<div class="row" data-tx="range"><label class="f grow"><span>کمینه</span><input name="min" type="number" step="any" class="ltr" value="' + (t.min == null ? '' : t.min) + '"></label><label class="f grow"><span>بیشینه</span><input name="max" type="number" step="any" class="ltr" value="' + (t.max == null ? '' : t.max) + '"></label><label class="f" style="width:110px"><span>واحد</span><input name="unit" value="' + esc(t.unit || '') + '" placeholder="تومان، ms…"></label></div>';
+  modal({ title: (t.id ? '✎ ویرایشِ تست' : '🧪 تستِ تازه') + ' — ' + n.title, cls: 'wide', body: body, ok: 'ذخیره',
+    setup: function (f) {
+      var sel = $('[name=expect_kind]', f);
+      function sync() { var r = sel.value === 'range'; $$('[data-tx=range]', f).forEach(function (e) { e.style.display = r ? '' : 'none'; }); $$('[data-tx=val]', f).forEach(function (e) { e.style.display = r ? 'none' : ''; }); }
+      sel.addEventListener('change', sync); sync();
+    },
+    onok: function (f) {
+      var o = { project_id: S.pid, node_id: nodeId, id: t.id || 0 };
+      ['title', 'port', 'ref', 'state', 'given', 'expect_kind', 'kind', 'priority', 'expect', 'min', 'max', 'unit'].forEach(function (k) { var el = $('[name=' + k + ']', f); if (el) o[k] = el.value; });
+      return api('test_save', o).then(afterTestChange);
+    } });
+}
+function testsByNode() {
+  return api('tests_all', { project_id: S.pid }).then(function (j) { var m = {}; j.tests.forEach(function (t) { (m[t.node_id] = m[t.node_id] || []).push(t); }); return m; });
+}
+function testsView() {
+  S.tt = S.tt || { q: '', status: '', kind: '', node: 0, off: 0, limit: 100 };
+  var idx = S.idx, nodes = [];
+  idx.preorder.forEach(function (id) { var n = idx.byId.get(id); if (n.kind !== 'task') nodes.push('<option value="' + id + '"' + (S.tt.node === id ? ' selected' : '') + '>' + new Array(idx.depth(id) + 1).join('— ') + esc(n.title) + '</option>'); });
+  return '<div class="card" id="tsum"></div>' +
+    '<div class="card"><div class="row"><input id="tq" placeholder="جست‌وجو در عنوان، پورت، حالت، ورودی…" value="' + esc(S.tt.q) + '" style="flex:3;width:auto;min-width:200px">' +
+    '<select id="tst" style="width:auto;flex:1;min-width:130px"><option value="">همهٔ وضعیت‌ها</option>' + Object.keys(TS).map(function (k) { return '<option value="' + k + '"' + (S.tt.status === k ? ' selected' : '') + '>' + TS[k] + '</option>'; }).join('') + '</select>' +
+    '<select id="tkd" style="width:auto;flex:1;min-width:130px"><option value="">همهٔ نوع‌ها</option>' + Object.keys(TK).map(function (k) { return '<option value="' + k + '"' + (S.tt.kind === k ? ' selected' : '') + '>' + TK[k] + '</option>'; }).join('') + '</select>' +
+    '<select id="tnd" style="width:auto;flex:2;min-width:180px"><option value="0">کلِ پروژه</option>' + nodes.join('') + '</select></div>' +
+    '<div class="row" style="margin-top:8px"><button class="btn sm" data-act="tbulk" data-v="pass">✓ انتخاب‌شده‌ها موفق</button><button class="btn sm" data-act="tbulk" data-v="fail">✗ ناموفق</button><button class="btn sm" data-act="tbulk" data-v="skip">⏭ رد</button>' +
+    '<button class="btn sm" id="tall">انتخابِ همهٔ این صفحه</button><span class="grow"></span><button class="btn sm" data-act="treset">↺ پاک‌کردنِ نتیجه‌ها</button><button class="btn sm" data-act="tcsv">⬇ CSV</button></div></div>' +
+    '<div id="tlist"><div class="card empty">در حالِ بارگذاری…</div></div>' +
+    (S.editing ? '<div class="mut sm">برای افزودنِ تست، بخش/ماژول را انتخاب کنید و در پنلِ جزئیاتش «＋ تستِ تازه» را بزنید.</div>' : '');
+}
+function bindTests() {
+  var q = $('#tq'); if (!q) return;
+  var go = function () { S.tt.q = $('#tq').value; S.tt.status = $('#tst').value; S.tt.kind = $('#tkd').value; S.tt.node = +$('#tnd').value; S.tt.off = 0; loadTests(); };
+  var tm; q.addEventListener('input', function () { clearTimeout(tm); tm = setTimeout(go, 300); });
+  ['tst', 'tkd', 'tnd'].forEach(function (i) { $('#' + i).addEventListener('change', go); });
+  $('#tall').addEventListener('click', function () { $$('[data-tsel]').forEach(function (c) { c.checked = true; }); });
+  loadTests();
+}
+function loadTests() {
+  var T = S.tt;
+  return api('tests', { project_id: S.pid, node_id: T.node || 0, sub: 1, status: T.status, kind: T.kind, q: T.q, limit: T.limit, offset: T.off }).then(function (j) {
+    var sm = j.summary || {}, tot = 0; Object.keys(TS).forEach(function (k) { tot += +(sm[k] || 0); });
+    var sum = $('#tsum'); if (sum) sum.innerHTML = '<div class="row" style="gap:18px"><b>' + FA(tot) + ' تست</b>' + Object.keys(TS).map(function (k) { return '<span><span class="dot" style="background:' + TSC[k] + '"></span> ' + TS[k] + ' <b>' + FA(sm[k] || 0) + '</b></span>'; }).join('') + '</div>' +
+      '<div class="bar" style="margin-top:8px;height:10px;display:flex">' + Object.keys(TS).map(function (k) { return tot && sm[k] ? '<i style="width:' + (sm[k] / tot * 100) + '%;background:' + TSC[k] + '"></i>' : ''; }).join('') + '</div>';
+    var box = $('#tlist'); if (!box) return;
+    box.innerHTML = (j.tests.map(function (t) { return testRow(t, true); }).join('') || '<div class="card empty">تستی با این فیلتر نیست.</div>') +
+      '<div class="row" style="margin:8px 0"><button class="btn sm" data-act="tpage" data-d="-' + T.limit + '"' + (T.off ? '' : ' disabled') + '>→ قبلی</button><span class="mut sm">' + FA(T.off + 1) + ' تا ' + FA(Math.min(T.off + T.limit, j.total)) + ' از ' + FA(j.total) + '</span><button class="btn sm" data-act="tpage" data-d="' + T.limit + '"' + (T.off + T.limit < j.total ? '' : ' disabled') + '>بعدی ←</button></div>';
+  });
+}
+
 /* ---------- کتابخانهٔ ماژول‌ها ---------- */
 function openLibrary() { return api('library').then(function (r) { location.hash = '#/p/' + r.id + '/map'; }); }
 function bundledDialog() {
@@ -1084,6 +1192,7 @@ function renderDrawer() {
   var prSel = [1, 2, 3].map(function (k) { return '<option value="' + k + '"' + (n.priority === k ? ' selected' : '') + '>' + E.PRIO[k] + '</option>'; }).join('');
   var ck = childKinds(id), hasFlow = n.flow && n.flow.nodes && n.flow.nodes.length;
   d.className = '';
+  setTimeout(function () { loadNodeTests(id); }, 0);
   d.innerHTML = '<div class="dh"><span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><h3>' + esc(n.title) + '</h3><button class="btn sm" data-act="closedrawer">بستن ✕</button></div>' +
     '<div class="row sm mut" style="margin-bottom:6px"><span class="kb2 ' + n.kind + '">' + KIND_ICON[n.kind] + ' ' + E.KIND[n.kind] + '</span><span>' + esc(idx.pathText(id)) + '</span>' + (v.es ? '<span><bdi>' + J.fmt(J.dayToIso(v.es)) + '</bdi> تا <bdi>' + J.fmt(J.dayToIso(v.ef - 1)) + '</bdi></span>' : '') + (v.crit ? '<b class="crit">بحرانی</b>' : '') + '<span>⏱ ' + fmtDur(nodeTime(id)) + '</span></div>' +
     (n.src_name ? '<div class="sub lineage">📚 رونوشت/ارث‌برده از ماژولِ کتابخانه: <b>' + esc(n.src_name) + '</b></div>' : '') +
@@ -1101,6 +1210,7 @@ function renderDrawer() {
     '<div class="sub"><h4>⇠ ' + (single ? 'خروجی (فقط یکی)' : 'خروجی‌ها') + '</h4><div id="io-out">' + ioRows('out', n.outputs, single) + '</div>' + (single && (n.outputs || []).length ? '' : '<button type="button" class="btn sm" data-act="addio" data-k="out">＋ خروجی</button>') + '</div>' +
     '<label class="f"><span>پردازش (ورودی‌ها چطور به خروجی تبدیل می‌شوند؟)</span><textarea name="process">' + esc(n.process) + '</textarea></label>' +
     '</fieldset>' + portStatusBlock(n) +
+    '<div class="sub" id="dtests"><h4>🧪 تست‌ها <span class="mut sm">(در حالِ بارگذاری…)</span></h4></div>' +
     '<div class="sub"><h4>⎇ فلوچارت (توضیحِ گرافیکیِ پردازش)</h4>' + (hasFlow ?
       '<div class="flthumb" data-act="flowedit" data-id="' + id + '" title="کلیک کنید">' + FLOW.svg(n.flow, { width: '100%', height: 'auto', ink: 'currentColor' }) + '</div><div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">' + (ed ? '✎ ویرایش' : '🔍 بزرگ‌نمایی') + '</button>' + (ed ? '<button type="button" class="btn sm danger" data-act="flowdel" data-id="' + id + '">حذف</button>' : '') + '</div>' :
       (ed ? '<button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">＋ رسمِ فلوچارت</button>' : '<div class="mut sm">فلوچارتی رسم نشده.</div>')) + '</div>' +
@@ -1178,7 +1288,7 @@ function outlineView() {
     idx.children(pid).forEach(function (id) {
       var n = idx.byId.get(id), v = S.sch.info.get(id) || {}, kc = idx.children(id).length, d = idx.depth(id), cnt = childKinds(id).length;
       rows.push('<div class="tr' + (S.sel === id ? ' sel' : '') + '" style="padding-inline-start:' + (8 + d * 22) + 'px"><span class="tg" data-act="toggle" data-id="' + id + '">' + (kc ? (isOpen(id) ? '▾' : '◂') : '·') + '</span>' +
-        '<span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><span class="kb2 ' + n.kind + '">' + E.KIND[n.kind] + '</span><span class="tt" data-act="pick" data-id="' + id + '">' + esc(n.title) + '</span>' +
+        '<span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><span class="kb2 ' + n.kind + '">' + E.KIND[n.kind] + '</span><span class="tt" data-act="pick" data-id="' + id + '">' + esc(n.title) + '</span>' + testBadge(id) +
         statusPill(v.status || n.status) + '<span style="width:70px">' + bar(v.progress) + '</span><span class="sm mut" style="width:46px">' + FA(v.progress || 0) + '٪</span>' +
         '<span class="sm mut" style="width:54px">' + (v.dur ? num(v.dur) + ' روز' : '') + '</span><span class="sm mut" style="width:84px">⏱ ' + fmtDur(nodeTime(id)) + '</span>' +
         (ed ? '<span class="row" style="gap:2px;flex-wrap:nowrap">' + (cnt ? '<button class="btn sm ghost" title="زیربخشِ جدید" data-act="addnode" data-parent="' + id + '">＋</button>' : '') +
@@ -1493,8 +1603,21 @@ var ACTS = {
   delfile: function (el) { if (!confirm('این پیوست پاک شود؟')) return; return api('file_delete', { project_id: S.pid, id: elId(el) }).then(reload); },
   lightbox: function (el) { modal({ title: 'تصویر', cls: 'wide', body: '<img src="' + esc(el.getAttribute('data-src')) + '" style="max-width:100%;border-radius:8px">', noOk: true, noFocus: true }); },
   savebrief: function () { var p = S.P.project; return api('project_save', { project_id: S.pid, name: p.name, description: p.description, start_date: p.start_date, target_date: p.target_date, status: p.status, ai_brief: $('#aibrief').value }).then(function () { toast('ذخیره شد'); return reload(); }); },
-  exportjson: function () { download(safeName(S.P.project.name) + '.pm.json', JSON.stringify(E.buildExport(S.idx, S.sch), null, 2)); },
-  exportmd: function () { download(safeName(S.P.project.name) + '.md', E.buildMarkdown(S.idx, S.sch), 'text/markdown'); },
+  exportjson: function () { return testsByNode().then(function (tm) { download(safeName(S.P.project.name) + '.pm.json', JSON.stringify(E.buildExport(S.idx, S.sch, tm), null, 2)); }); },
+  exportmd: function () { return testsByNode().then(function (tm) { download(safeName(S.P.project.name) + '.md', E.buildMarkdown(S.idx, S.sch, tm), 'text/markdown'); }); },
+  tadd: function (el) { return testDialog(+el.getAttribute('data-node'), null); },
+  tedit: function (el) { var t = (S._tcache || {})[+el.getAttribute('data-id')]; if (t) return testDialog(t.node_id, t); },
+  tdel: function (el) { if (!confirm('این تست حذف شود؟')) return; return api('test_delete', { project_id: S.pid, id: +el.getAttribute('data-id') }).then(afterTestChange); },
+  tstat: function (el) { return api('test_status', { project_id: S.pid, id: +el.getAttribute('data-id'), status: el.getAttribute('data-v') }).then(afterTestChange); },
+  treset: function () { if (!confirm('نتیجهٔ همهٔ تست‌های ' + (S.tt && S.tt.node ? 'این بخش' : 'پروژه') + ' «اجرا نشده» شود؟')) return; return api('test_reset', { project_id: S.pid, node_id: (S.tt && S.tt.node) || 0 }).then(afterTestChange); },
+  tbulk: function (el) { var v = el.getAttribute('data-v'); var ids = $$('[data-tsel]').filter(function (c) { return c.checked; }).map(function (c) { return +c.getAttribute('data-tsel'); }); if (!ids.length) return toast('تستی انتخاب نشده', true); return api('test_status', { project_id: S.pid, ids: ids, status: v }).then(afterTestChange); },
+  tpage: function (el) { S.tt.off = Math.max(0, S.tt.off + (+el.getAttribute('data-d'))); return loadTests(); },
+  tpick: function (el) { var id = +el.getAttribute('data-id'); S.sel = id; S.drawerOpen = true; renderDrawer(); },
+  tcsv: function () { return api('tests_all', { project_id: S.pid }).then(function (j) {
+    var q = function (x) { return '"' + String(x == null ? '' : x).replace(/"/g, '""') + '"'; };
+    var rows = [['بخش', 'شناسه', 'عنوان', 'پورت', 'حالت', 'ورودی', 'نوع انتظار', 'انتظار', 'از', 'تا', 'واحد', 'نوع', 'وضعیت'].map(q).join(',')];
+    j.tests.forEach(function (t) { var n = S.idx.byId.get(t.node_id); rows.push([n ? S.idx.pathText(t.node_id) : '', t.ref, t.title, t.port, t.state, t.given, TX[t.expect_kind], t.expect, t.min, t.max, t.unit, TK[t.kind], TS[t.status]].map(q).join(',')); });
+    download(safeName(S.P.project.name) + '-tests.csv', '\ufeff' + rows.join('\n'), 'text/csv'); }); },
   exportzip: function () { location.href = 'api.php?a=files_zip&project_id=' + S.pid; },
   copyprompt: function () { var t = PROMPT; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () { toast('کپی شد'); }).catch(function () { var r = document.createRange(); r.selectNodeContents($('#promptbox')); var s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('متن انتخاب شد؛ Ctrl+C بزنید'); }); },
   fillest: function () { var items = []; S.sch.order.forEach(function (id) { var n = S.idx.byId.get(id); if (n.est_days == null && n.final_days == null) items.push({ id: id, est_days: E.heuristic(n) }); }); if (!items.length) return toast('برآوردِ خالی‌ای نبود'); return api('nodes_bulk', { project_id: S.pid, items: items }).then(function () { toast(FA(items.length) + ' برآورد ثبت شد'); return reload(); }); },
@@ -1505,7 +1628,7 @@ var ACTS = {
   },
   clearsched: function () { if (!confirm('همهٔ تاریخ‌های شروعِ ثبت‌شده پاک شود (برنامه دوباره خودکار از وابستگی‌ها محاسبه می‌شود)؟')) return; var items = S.sch.order.filter(function (id) { return S.idx.byId.get(id).start_date; }).map(function (id) { return { id: id, start_date: null }; }); if (!items.length) return; return api('nodes_bulk', { project_id: S.pid, items: items }).then(reload); }
 };
-var MUT = { addnode: 1, mv: 1, delnode: 1, deldep: 1, deptwo: 1, addio: 1, rmrow: 1, addms: 1, editms: 1, dellog: 1, delfile: 1, savebrief: 1, fillest: 1, applysched: 1, clearsched: 1, flowdel: 1, maplayout: 1, editproject: 1 };
+var MUT = { tadd: 1, tedit: 1, tdel: 1, addnode: 1, mv: 1, delnode: 1, deldep: 1, deptwo: 1, addio: 1, rmrow: 1, addms: 1, editms: 1, dellog: 1, delfile: 1, savebrief: 1, fillest: 1, applysched: 1, clearsched: 1, flowdel: 1, maplayout: 1, editproject: 1 };
 document.addEventListener('click', function (e) {
   if (!(e.target.closest && e.target.closest('.mm'))) $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });
   var dot = e.target.closest ? e.target.closest('#colpick .cv-dot') : null;

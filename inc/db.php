@@ -30,7 +30,7 @@ function pm_db(): PDO
 function pm_schema(PDO $db): void
 {
     $v = (int)$db->query('PRAGMA user_version')->fetchColumn();
-    if ($v >= 5) return;
+    if ($v >= 6) return;
     if ($v < 1) $db->exec("
     CREATE TABLE IF NOT EXISTS users(
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
@@ -101,6 +101,94 @@ function pm_schema(PDO $db): void
         try { $db->exec('ALTER TABLE deps ADD COLUMN bnd TEXT'); } catch (Throwable $e) { /* هست */ }
         $db->exec('PRAGMA user_version=5');
     }
+    if ($v < 6) {
+        // v6: تست‌ها — هر گره (ماژول/بخش/کار/…) چند تست دارد: ورودی/پورت + حالت + ورودیِ نمونه + نتیجهٔ مورد انتظار (مقدار یا بازه)
+        $db->exec("CREATE TABLE IF NOT EXISTS tests(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, node_id INTEGER NOT NULL,
+          ref TEXT DEFAULT '', title TEXT NOT NULL, port TEXT DEFAULT '', state TEXT DEFAULT '', given TEXT DEFAULT '',
+          expect_kind TEXT DEFAULT 'value', expect TEXT DEFAULT '', min REAL, max REAL, unit TEXT DEFAULT '',
+          kind TEXT DEFAULT 'unit', priority INTEGER DEFAULT 2, source TEXT DEFAULT '',
+          status TEXT DEFAULT 'untested', last_at TEXT, last_by TEXT DEFAULT '', last_note TEXT DEFAULT '',
+          sort INTEGER DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS tests_n ON tests(project_id, node_id);
+        CREATE INDEX IF NOT EXISTS tests_s ON tests(project_id, status);
+        CREATE INDEX IF NOT EXISTS tests_r ON tests(node_id, ref);");
+        $db->exec('PRAGMA user_version=6');
+    }
+}
+
+const PM_TEST_KINDS = ['unit' => 'واحد', 'integration' => 'یکپارچگی', 'e2e' => 'سرتاسری', 'manual' => 'دستی', 'security' => 'امنیتی', 'perf' => 'کارایی'];
+const PM_TEST_EXPECT = ['value' => 'برابر مقدار', 'range' => 'در بازه', 'contains' => 'شامل متن', 'true' => 'درست باشد', 'false' => 'نادرست باشد', 'error' => 'خطا بدهد', 'any' => 'شرحِ آزاد'];
+const PM_TEST_STATUS = ['untested' => 'اجرا نشده', 'pass' => 'موفق', 'fail' => 'ناموفق', 'skip' => 'ردشده'];
+
+/** پاک‌سازیِ یک تست؛ فقط کلیدهای حاضر برمی‌گردند. */
+function pm_clean_test(array $in): array
+{
+    $o = [];
+    foreach (['title' => 400, 'ref' => 80, 'port' => 200, 'state' => 400, 'given' => 4000, 'expect' => 4000, 'unit' => 40, 'source' => 200, 'last_note' => 1000] as $k => $n) {
+        if (array_key_exists($k, $in)) $o[$k] = pm_str($in[$k], $n);
+    }
+    if (isset($o['title']) && $o['title'] === '') $o['title'] = 'تست بدون عنوان';
+    if (array_key_exists('expect_kind', $in)) $o['expect_kind'] = isset(PM_TEST_EXPECT[$in['expect_kind']]) ? $in['expect_kind'] : 'value';
+    if (array_key_exists('kind', $in)) $o['kind'] = isset(PM_TEST_KINDS[$in['kind']]) ? $in['kind'] : 'unit';
+    if (array_key_exists('status', $in)) $o['status'] = isset(PM_TEST_STATUS[$in['status']]) ? $in['status'] : 'untested';
+    if (array_key_exists('priority', $in)) $o['priority'] = max(1, min(3, (int)$in['priority']));
+    foreach (['min', 'max'] as $k) {
+        if (array_key_exists($k, $in)) $o[$k] = ($in[$k] === null || $in[$k] === '' || !is_numeric($in[$k])) ? null : (float)$in[$k];
+    }
+    return $o;
+}
+
+/** ذخیرهٔ تست برای یک گره: با id یا ref (در همان گره) به‌روز می‌شود؛ وگرنه تازه. */
+function pm_test_put(PDO $db, int $pid, int $nodeId, array $in, string $author, bool $keepStatus = false): int
+{
+    $f = pm_clean_test($in);
+    $id = (int)($in['id'] ?? 0);
+    if (!$id && !empty($f['ref'])) {
+        $q = $db->prepare('SELECT id FROM tests WHERE node_id=? AND ref=?');
+        $q->execute([$nodeId, $f['ref']]);
+        $id = (int)$q->fetchColumn();
+    }
+    $now = pm_now();
+    if (!$keepStatus && isset($f['status'])) { $f['last_at'] = $now; $f['last_by'] = $author; }
+    if ($id) {
+        $q = $db->prepare('SELECT id FROM tests WHERE id=? AND project_id=?');
+        $q->execute([$id, $pid]);
+        if ($q->fetchColumn()) {
+            $f['updated_at'] = $now;
+            $set = implode(',', array_map(fn($k) => "$k=?", array_keys($f)));
+            $db->prepare("UPDATE tests SET $set WHERE id=?")->execute([...array_values($f), $id]);
+            return $id;
+        }
+    }
+    $f += ['title' => 'تست بدون عنوان'];
+    $f['project_id'] = $pid; $f['node_id'] = $nodeId; $f['created_at'] = $now; $f['updated_at'] = $now;
+    if (!isset($f['sort'])) {
+        $q = $db->prepare('SELECT COALESCE(MAX(sort),0)+1 FROM tests WHERE node_id=?');
+        $q->execute([$nodeId]);
+        $f['sort'] = (int)$q->fetchColumn();
+    }
+    $db->prepare('INSERT INTO tests(' . implode(',', array_keys($f)) . ') VALUES(' . implode(',', array_fill(0, count($f), '?')) . ')')->execute(array_values($f));
+    return (int)$db->lastInsertId();
+}
+
+/** شمارِ تست‌های هر گره (همان گره، نه زیرمجموعه): {node_id: {n, pass, fail, skip}} */
+function pm_test_stats(PDO $db, int $pid): array
+{
+    $st = $db->prepare("SELECT node_id, COUNT(*) n, SUM(status='pass') p, SUM(status='fail') f, SUM(status='skip') s FROM tests WHERE project_id=? GROUP BY node_id");
+    $st->execute([$pid]);
+    $o = [];
+    foreach ($st as $r) $o[(int)$r['node_id']] = ['n' => (int)$r['n'], 'pass' => (int)$r['p'], 'fail' => (int)$r['f'], 'skip' => (int)$r['s']];
+    return $o;
+}
+
+/** خروجیِ یک تست برای JSON (بدونِ ستون‌های داخلی) */
+function pm_test_out(array $r): array
+{
+    return ['id' => (int)$r['id'], 'node_id' => (int)$r['node_id'], 'ref' => $r['ref'], 'title' => $r['title'], 'port' => $r['port'], 'state' => $r['state'], 'given' => $r['given'],
+        'expect_kind' => $r['expect_kind'], 'expect' => $r['expect'], 'min' => $r['min'] === null ? null : (float)$r['min'], 'max' => $r['max'] === null ? null : (float)$r['max'],
+        'unit' => $r['unit'], 'kind' => $r['kind'], 'priority' => (int)$r['priority'], 'source' => $r['source'], 'status' => $r['status'], 'last_at' => $r['last_at'],
+        'last_by' => $r['last_by'], 'last_note' => $r['last_note']];
 }
 
 function pm_now(): string { return date('Y-m-d H:i:s'); }
@@ -298,6 +386,7 @@ function pm_delete_nodes(PDO $db, int $pid, int $id): int
     pm_delete_files($db, "project_id=? AND node_id IN ($in)", [$pid]);
     $db->exec("DELETE FROM deps WHERE project_id=$pid AND (from_id IN ($in) OR to_id IN ($in))");
     $db->exec("DELETE FROM logs WHERE project_id=$pid AND node_id IN ($in)");
+    $db->exec("DELETE FROM tests WHERE project_id=$pid AND node_id IN ($in)");
     $db->exec("DELETE FROM nodes WHERE project_id=$pid AND id IN ($in)");
     return count($ids);
 }
@@ -433,6 +522,13 @@ function pm_copy_subtree(PDO $db, int $srcId, int $dstPid, ?int $dstParent, arra
         foreach ($byParent[(int)$r['id']] ?? [] as $c) $walk($c, $nid, false);
     };
     $walk($root, $dstParent, true);
+    // تست‌های هر گره (نتیجه‌ها پاک می‌شوند؛ تست‌ها همراهِ ماژول می‌آیند)
+    $tq = $db->query("SELECT * FROM tests WHERE node_id IN ($in) ORDER BY sort,id")->fetchAll();
+    if ($tq) {
+        $ti = $db->prepare("INSERT INTO tests(project_id,node_id,ref,title,port,state,given,expect_kind,expect,min,max,unit,kind,priority,source,status,sort,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'untested',?,?,?)");
+        foreach ($tq as $t) $ti->execute([$dstPid, $map[(int)$t['node_id']], $t['ref'], $t['title'], $t['port'], $t['state'], $t['given'], $t['expect_kind'], $t['expect'], $t['min'], $t['max'], $t['unit'], $t['kind'], $t['priority'], $t['source'], $t['sort'], $now, $now]);
+    }
     // وابستگی‌های درونیِ زیردرخت
     $ds = $db->query("SELECT * FROM deps WHERE from_id IN ($in) AND to_id IN ($in)")->fetchAll();
     $di = $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two,bnd) VALUES(?,?,?,?,?,?,?,?)');
@@ -445,7 +541,7 @@ function pm_snapshot(PDO $db, int $pid): array
 {
     $q = function (string $sql) use ($db, $pid) { $s = $db->prepare($sql); $s->execute([$pid]); return $s->fetchAll(); };
     return ['nodes' => $q('SELECT * FROM nodes WHERE project_id=? ORDER BY id'), 'deps' => $q('SELECT * FROM deps WHERE project_id=? ORDER BY id'),
-            'milestones' => $q('SELECT * FROM milestones WHERE project_id=? ORDER BY id')];
+            'milestones' => $q('SELECT * FROM milestones WHERE project_id=? ORDER BY id'), 'tests' => $q('SELECT * FROM tests WHERE project_id=? ORDER BY id')];
 }
 
 /** بازگردانیِ ساختار از تصویر. پیوست‌/یادداشتِ بخش‌هایی که در تصویر نیستند پاک می‌شود. */
@@ -468,6 +564,12 @@ function pm_restore(PDO $db, int $pid, array $snap): void
         }
         $db->prepare('DELETE FROM deps WHERE project_id=?')->execute([$pid]);
         $db->prepare('DELETE FROM milestones WHERE project_id=?')->execute([$pid]);
+        if (array_key_exists('tests', $snap)) {
+            $db->prepare('DELETE FROM tests WHERE project_id=?')->execute([$pid]);
+            $tc = ['id', 'node_id', 'ref', 'title', 'port', 'state', 'given', 'expect_kind', 'expect', 'min', 'max', 'unit', 'kind', 'priority', 'source', 'status', 'last_at', 'last_by', 'last_note', 'sort', 'created_at', 'updated_at'];
+            $ti = $db->prepare('INSERT INTO tests(project_id,' . implode(',', $tc) . ') VALUES(?,' . implode(',', array_fill(0, count($tc), '?')) . ')');
+            foreach ($snap['tests'] as $t) { $row = [$pid]; foreach ($tc as $c) $row[] = $t[$c] ?? null; $ti->execute($row); }
+        }
         $ph = implode(',', array_fill(0, count($cols), '?'));
         $up = $db->prepare('INSERT OR REPLACE INTO nodes(' . implode(',', $cols) . ") VALUES($ph)");
         foreach ($snap['nodes'] ?? [] as $n) {

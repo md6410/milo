@@ -2,6 +2,7 @@
 """پروژهٔ «فروشگاهِ Weby» — کلِ سایت به‌صورتِ بخش‌های کلی که از ماژول‌های کتابخانه ساخته شده‌اند."""
 from dsl import Doc, P, use
 from proj import load, place, finish_area
+from wattach import attach, NEW_AREAS
 
 NAME = 'فروشگاه‌ساز Weby'
 SUMMARY = ('کلِ فروشگاهِ آنلاین Weby (فروشگاه، انبار، پرداخت، ارسال، پیامک…) به‌شکل یک پروژهٔ Milo: '
@@ -133,4 +134,11 @@ def build():
     d.link(A2, 'وضعیتِ سفارش', A6, 'رویدادِ سفارش', 'اعلانِ پیامکی', two=True)
     d.link(A3, 'سفارشِ بسته‌شده', A2, 'رویدادِ انبار و ارسال', 'خروج از انبار', two=True)
     d.link(A5, 'کارِ ارسال', A2, 'رویدادِ انبار و ارسال', 'تحویل/ناموفق', two=True)
+    # ===== بخش‌های کلیِ تکمیلی + تست‌های واقعیِ Weby
+    areas = {'catalog': A1, 'order': A2, 'infra': A8}
+    for key, (t, ic, col, sm) in NEW_AREAS.items():
+        areas[key] = d.area(t, icon=ic, color=col, summary=sm, details=sm + ' — ماژول‌های این بخش از روی آزمون‌های واقعیِ Weby ساخته شده‌اند.')
+    by_title = {n.title: n for n in d.nodes if n.kind == 'module'}
+    n = attach(d, by_title, areas)
+    print('   تست‌های Weby:', n)
     return d, SLUG, TITLE

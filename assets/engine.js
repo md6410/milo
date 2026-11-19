@@ -180,17 +180,21 @@
     'PORT PURPOSE RULE: every input and output of a node must have a purpose. Either define it in the node\'s "flow": a flow node (type io) with "port":{"side":"in"|"out","name":"<exact port name>"}; an input must have an outgoing edge (what is done with it) and an output must have an incoming edge (where it comes from). Or mark the port unused: {"unused":true,"why":"reason"}. Ports have "desc" (definition inside the module) and "use" (what it means in THIS place where the module is used) - fill "use" for module instances. "port_issues" lists the ports that currently have no purpose; fix them.',
     'TWO-WAY LINKS: a dependency with "two":true is bidirectional (data flows both ways); it does not impose a build order.',
     'VISUAL FIELDS: x, y, color (#rrggbb) and icon on a node are canvas layout hints - keep them unchanged (new nodes may omit them). "flow" is an optional flowchart that explains the node\'s process graphically: {"nodes":[{"id","type","text","x","y","w","h"}],"edges":[{"id","from","to","label"}]} with type one of start,end,process,decision,io,sub,db,note,text (edge labels on a decision are usually yes/no). Follow it when implementing; if you change the process, update the flow too, and you may add a flow to a node that has none.',
+    'TESTS: a node may carry "tests": [{ref,title,port,state,given,expect_kind,expect,min,max,unit,kind,priority,status}]. port = the exact input/output port name the test exercises; state = the situation (e.g. "empty cart", "token expired"); given = the sample input; expect_kind is one of value|range|contains|true|false|error|any and expect (or min..max for range) is the required answer. Implement the node so that every listed test would pass; when you add or change behaviour add/update its tests in the same file (same shape, id optional; use "ref" to update an existing test in place); never delete a test unless it is wrong, and then set "deleted": true. Report the result of every test you ran by setting its "status" to pass|fail|skip.',
     'Never invent ids for existing nodes, never drop the "id" of an existing item, and never put secrets or passwords in the file.'
   ];
 
-  function nodeOut(idx, n) {
-    return { id: n.id, parent: n.parent_id || null, order: n.sort, kind: n.kind, title: n.title, summary: n.summary, details: n.details,
+  function nodeOut(idx, n, tests) {
+    var tl = tests && tests[n.id] ? tests[n.id].map(function (t) { return { id: t.id, ref: t.ref || '', title: t.title, port: t.port || '', state: t.state || '', given: t.given || '', expect_kind: t.expect_kind, expect: t.expect || '', min: t.min, max: t.max, unit: t.unit || '', kind: t.kind, priority: t.priority, status: t.status, source: t.source || '' }; }) : null;
+    var o = { id: n.id, parent: n.parent_id || null, order: n.sort, kind: n.kind, title: n.title, summary: n.summary, details: n.details,
       inputs: n.inputs, outputs: n.outputs, process: n.process, tech: n.tech, priority: n.priority, status: n.status, progress: n.progress,
       est_days: n.est_days, final_days: n.final_days, start_date: n.start_date, done_date: n.done_date, assignee: n.assignee, tags: n.tags,
       src_name: n.src_name || null, color: n.color || null, icon: n.icon || null, x: n.x == null ? null : n.x, y: n.y == null ? null : n.y, flow: n.flow || null };
+    if (tl) o.tests = tl;
+    return o;
   }
 
-  function buildExport(idx, sch) {
+  function buildExport(idx, sch, tests) {
     var P = idx.P, p = P.project;
     var bo = sch.order.map(function (id) {
       var v = sch.info.get(id), n = idx.byId.get(id);
@@ -206,7 +210,7 @@
       port_issues: portIssues(idx).map(function (i) { return { node: i.id, title: i.title, ports: i.ports.map(function (s) { return (s.side === 'in' ? 'input: ' : 'output: ') + s.name + ' (' + s.state + ')'; }) }; }),
       project: { id: p.id, name: p.name, description: p.description, start_date: p.start_date, target_date: p.target_date, status: p.status, ai_brief: p.ai_brief },
       build_order: bo,
-      nodes: P.nodes.map(function (n) { return nodeOut(idx, n); }),
+      nodes: P.nodes.map(function (n) { return nodeOut(idx, n, tests); }),
       dependencies: P.deps.map(function (d) { return { from: d.from_id, to: d.to_id, label: d.label, out: d.out_name || null, 'in': d.in_name || null, two: !!d.two, bnd: d.bnd || null }; }),
       milestones: P.milestones.map(function (m) { return { id: m.id, title: m.title, date: m.date, done: !!m.done, note: m.note }; }),
       logs: P.logs.slice().reverse().map(function (l) { return { id: l.id, node: l.node_id, kind: l.kind, body: l.body, author: l.author, date: l.created_at }; }),
@@ -215,7 +219,7 @@
     };
   }
 
-  function buildMarkdown(idx, sch) {
+  function buildMarkdown(idx, sch, tests) {
     var P = idx.P, p = P.project, L = [];
     L.push('# ' + p.name, '');
     if (p.description) L.push(p.description, '');
@@ -237,6 +241,10 @@
       if (n.process) L.push('', '**پردازش:**', '', n.process);
       if (n.flow && W.FLOW) { var mm = W.FLOW.mermaid(n.flow); if (mm) L.push('', '**فلوچارت:**', '', '```mermaid', mm, '```'); }
       if (n.tech) L.push('', '**نکات فنی:**', '', n.tech);
+      if (tests && tests[n.id] && tests[n.id].length) {
+        L.push('', '**تست‌ها:**');
+        tests[n.id].forEach(function (t) { L.push('- ' + (t.ref ? '`' + t.ref + '` ' : '') + t.title + (t.port ? ' — پورت «' + t.port + '»' : '') + (t.state ? ' — حالت: ' + t.state : '') + (t.given ? ' — ورودی: ' + t.given : '') + ' ← انتظار: ' + (t.expect_kind === 'range' ? (t.min == null ? '' : t.min) + ' تا ' + (t.max == null ? '' : t.max) + (t.unit ? ' ' + t.unit : '') : (t.expect || t.expect_kind))); });
+      }
       var di = (idx.inn.get(id) || []);
       if (di.length) { L.push('', '**وابسته به:**'); di.forEach(function (x) { L.push('- ' + idx.byId.get(x.from_id).title + ' `#' + x.from_id + '`' + ((x.out_name || x.in_name) ? ' [' + (x.out_name || '?') + ' ← ' + (x.in_name || '?') + ']' : '') + (x.label ? ' (' + x.label + ')' : '')); }); }
       L.push('');

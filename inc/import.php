@@ -122,6 +122,23 @@ function pm_import(PDO $db, array $doc, string $mode, ?int $pid, string $author)
         }
         foreach ($todel as $id) { $stat['nodes_deleted'] += pm_delete_nodes($db, $pid, $id); }
 
+        // تست‌های هر گره: [{ref,title,port,state,given,expect_kind,expect,min,max,unit,kind,priority,status,deleted}]
+        $stat['tests'] = 0;
+        foreach ($nodes as $n) {
+            if (!is_array($n) || empty($n['tests']) || !is_array($n['tests']) || !empty($n['deleted'])) continue;
+            $nid = $map[pm_key($n['id'] ?? '')] ?? 0;
+            if (!$nid) continue;
+            foreach ($n['tests'] as $t) {
+                if (!is_array($t)) continue;
+                if (!empty($t['deleted'])) {
+                    if (!empty($t['id'])) $db->prepare('DELETE FROM tests WHERE id=? AND node_id=?')->execute([(int)$t['id'], $nid]);
+                    continue;
+                }
+                pm_test_put($db, $pid, $nid, $t, $author, $mode === 'new');
+                $stat['tests']++;
+            }
+        }
+
         // وابستگی‌ها
         foreach (is_array($doc['dependencies'] ?? null) ? $doc['dependencies'] : [] as $d) {
             if (!is_array($d)) continue;
