@@ -335,6 +335,8 @@ function dashView() {
     var v = sch.info.get(id), n = idx.byId.get(id);
     return '<div data-act="pick" data-id="' + id + '"><span class="grow t">' + esc(n.title) + '</span><span style="width:110px">' + bar(v ? v.progress : 0) + '</span><b class="sm" style="width:40px">' + FA(v ? v.progress : 0) + '٪</b></div>';
   }).join('');
+  var pIss = E.portIssues(idx);
+  var issHtml = pIss.length ? '<h2 class="sec">⚠ ورودی/خروجیِ بی‌هدف <span class="pill s st-blocked">' + FA(pIss.length) + ' بخش</span></h2><div class="list">' + pIss.slice(0, 8).map(function (i) { return '<div data-act="pick" data-id="' + i.id + '"><span class="grow t">' + esc(i.title) + '</span><span class="mut sm">' + i.ports.map(function (p) { return (p.side === 'in' ? '⇢' : '⇠') + esc(p.name); }).join('، ') + '</span></div>'; }).join('') + '</div>' : '<h2 class="sec">🎯 ورودی/خروجی‌ها</h2><div class="mut sm">همهٔ ورودی/خروجی‌ها هدف دارند ✓</div>';
   var chgList = P.changes.slice(0, 6).map(chgRow).join('') || '<div class="mut">—</div>';
   var rec = P.logs.slice(0, 8).map(function (l) {
     var n = l.node_id ? idx.byId.get(l.node_id) : null;
@@ -352,7 +354,7 @@ function dashView() {
     '<h2 class="sec">عقب‌افتاده</h2><div class="list">' + (over.map(nodeLink).join('') || '<div class="mut">مورد عقب‌افتاده‌ای نیست ✓</div>') + '</div></div>' +
     '<div class="card"><h2 class="sec">بخش‌های اصلی</h2><div class="list">' + tops + '</div>' +
     '<h2 class="sec">نقاط عطف پیش رو</h2><div class="list">' + (ms.map(function (m) { return '<div data-act="tab" data-v="gantt"><span>◆</span><span class="grow t">' + esc(m.title) + '</span><span class="mut sm">' + (m.date ? J.fmt(m.date, true) : '') + '</span></div>'; }).join('') || '<div class="mut">—</div>') + '</div>' +
-    '<h2 class="sec">🔄 آخرین تغییرات</h2><div class="list chglist">' + chgList + '</div><h2 class="sec">آخرین گزارش‌ها</h2><div class="list">' + (rec || '<div class="mut">—</div>') + '</div></div></div>' +
+    '' + issHtml + '<h2 class="sec">🔄 آخرین تغییرات</h2><div class="list chglist">' + chgList + '</div><h2 class="sec">آخرین گزارش‌ها</h2><div class="list">' + (rec || '<div class="mut">—</div>') + '</div></div></div>' +
     (sch.cycle ? '<p class="crit">⚠ در وابستگی‌ها چرخه وجود دارد؛ زمان‌بندی دقیق نیست.</p>' : '');
 }
 
@@ -365,9 +367,11 @@ function blockDims(n) {
   var b = KSIZE[n.kind] || KSIZE.module, rows = Math.min(8, Math.max((n.inputs || []).length, (n.outputs || []).length));
   return { w: b.w, h: Math.max(b.h, portTop(n) + rows * 22 + 54) };
 }
+function portStateMap(n) { var m = {}; E.portStatus(n).forEach(function (s) { m[s.side + ':' + s.name] = s.state; }); return m; }
 function blockPorts(n) {
-  var top = portTop(n), mk = function (list) { return (list || []).slice(0, 8).map(function (p, i) { return { name: p.name, y: top + i * 22 + 11 }; }); };
-  return { 'in': mk(n.inputs), out: mk(n.outputs) };
+  var top = portTop(n), sm = portStateMap(n);
+  var mk = function (list, side) { return (list || []).slice(0, 8).map(function (p, i) { var st = sm[side + ':' + p.name]; return { name: p.name, y: top + i * 22 + 11, unused: st === 'unused', warn: st === 'none' || st === 'dangling', tip: E.PORT_MSG[st] || '' }; }); };
+  return { 'in': mk(n.inputs, 'in'), out: mk(n.outputs, 'out') };
 }
 function blockHtml(n, v, ghost) {
   var idx = S.idx, kc = idx.children(n.id).length, st = v.status || n.status, pr = v.progress != null ? v.progress : n.progress, meta = [], top = portTop(n);
@@ -375,8 +379,9 @@ function blockHtml(n, v, ghost) {
   if (n.flow && n.flow.nodes && n.flow.nodes.length) meta.push('⎇ فلوچارت');
   if (n.src_name) meta.push('📚 ' + esc(n.src_name));
   var t = nodeTime(n.id); if (t >= 60) meta.push('⏱ ' + fmtDur(t));
-  var pi = (n.inputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-pi" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
-  var po = (n.outputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-po" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
+  var sm = portStateMap(n), pcls = function (side, p) { var st = sm[side + ':' + p.name]; return st === 'unused' ? ' unused' : (st === 'none' || st === 'dangling' ? ' warn' : ''); };
+  var pi = (n.inputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-pi' + pcls('in', p) + '" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
+  var po = (n.outputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-po' + pcls('out', p) + '" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
   return '<div class="bk kk-' + n.kind + ' st-' + st + '"><div class="bk-h"><span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><span class="bk-k">' + E.KIND[n.kind] + (ghost ? ' · بیرونی' : '') + '</span>' +
     '<span class="bk-s">' + (v.crit && S.crit ? '<b class="crit">بحرانی</b> ' : '') + E.STATUS[st] + '</span></div><div class="bk-t">' + esc(n.title) + '</div>' + pi + po +
     '<div class="bk-m">' + (meta.join(' · ') || '&nbsp;') + '</div><div class="bk-p"><i style="width:' + pr + '%"></i></div></div>';
@@ -484,6 +489,7 @@ function mountMap() {
   var key = String(S.focus), m = mapModel(), fresh = !S.cvView[key];
   var cv = S.cv = PMCanvas.create(host, { id: 'map', view: S.cvView[key], readonly: !S.editing,
     onView: function (v) { S.cvView[key] = v; },
+    onPortClick: function (it, side, name) { portDialog2(rawId(it.id), side, name); },
     onSelect: function (it, lk) { var id = it ? rawId(it.id) : 0; if (id !== S.sel && !lk) { S.sel = id; if (!id) S.drawerOpen = false; renderDrawer(); updStatus(); refreshMenu(); } },
     onMove: function (list) {
       var items = list.map(function (x) { var n = S.idx.byId.get(+x.id); if (n) { n.x = x.x; n.y = x.y; } return { id: +x.id, x: x.x, y: x.y }; });
@@ -541,13 +547,38 @@ function iconDialog(id) {
       $('[name=own]', f).addEventListener('change', function (e) { set(e.target.value.trim()); });
     } });
 }
+/* جزئیاتِ یک ورودی/خروجی: تعریفِ ماژول، کاربردِ همین‌جا، «بدون استفاده» و وضعیتِ فلوچارت */
+function portDialog2(id, side, name) {
+  var n = S.idx.byId.get(id); if (!n) return;
+  var field = side === 'in' ? 'inputs' : 'outputs', list = n[field] || [], p = list.filter(function (x) { return x.name === name; })[0]; if (!p) return;
+  var st = E.portStatus(n).filter(function (x) { return x.side === side && x.name === name; })[0], ed = S.editing, dis = ed ? '' : ' disabled';
+  var lbl = side === 'in' ? 'ورودی' : 'خروجی';
+  modal({ title: (side === 'in' ? '⇢ ' : '⇠ ') + lbl + ' «' + name + '» — ' + n.title, noFocus: true, noOk: !ed, ok: '💾 ثبت',
+    body: '<div class="ps ' + st.state + '" style="margin-bottom:10px"><span class="ps-t">' + E.PORT_MSG[st.state] + '</span></div>' +
+      (n.src_name ? '<p class="sm mut">این بخش رونوشتی از ماژولِ کتابخانهٔ «' + esc(n.src_name) + '» است؛ «تعریف» از خودِ ماژول آمده و «کاربردِ اینجا» فقط برای همین استفاده است.</p>' : '') +
+      '<label class="f"><span>تعریف در خودِ ماژول (' + lbl + ' چیست / چه قالبی دارد)</span><textarea name="desc"' + dis + '>' + esc(p.desc || '') + '</textarea></label>' +
+      '<label class="f"><span>کاربردِ آن در همین جا (اختصاصیِ این استفاده از ماژول)</span><textarea name="use"' + dis + ' placeholder="' + (side === 'in' ? 'مثلاً: اینجا ایمیلِ مشتری به آن داده می‌شود' : 'مثلاً: خروجی به ماژولِ سفارش می‌رود') + '">' + esc(p.use || '') + '</textarea></label>' +
+      '<label class="row" style="margin-bottom:6px"><input type="checkbox" name="unused"' + (p.unused ? ' checked' : '') + dis + '> ✗ این ' + lbl + ' در اینجا استفاده نمی‌شود</label>' +
+      '<label class="f"><span>دلیل (لازم است اگر استفاده نمی‌شود)</span><input name="why" value="' + esc(p.why || '') + '"' + dis + '></label>' +
+      '<div class="row"><button type="button" class="btn" data-fl>⎇ رفتن به فلوچارت (تعریفِ پردازش)</button></div>' +
+      (ed ? '' : '<p class="mut sm">برای تغییر «✎ ویرایش» را بزنید.</p>'),
+    setup: function (f, close) { $('[data-fl]', f).addEventListener('click', function () { close(); ACTS.flowedit(null, null, id); }); },
+    onok: function (f) {
+      var un = $('[name=unused]', f).checked, why = $('[name=why]', f).value.trim();
+      if (un && !why) { toast('برای «بدون استفاده» دلیل بنویسید', true); return false; }
+      var nl = list.map(function (x) { return x.name === name ? { name: x.name, desc: $('[name=desc]', f).value, use: $('[name=use]', f).value, unused: un, why: un ? why : '' } : x; });
+      var body = { project_id: S.pid, id: id }; body[field] = nl;
+      return api('node_save', body).then(reload);
+    } });
+}
+
 /* افزودنِ ورودی/خروجی (برای «کار» فقط یکی) */
 function portDialog(id, field) {
   var n = S.idx.byId.get(id), list = (n[field] || []).slice(), single = n.kind === 'task', lbl = field === 'inputs' ? 'ورودی' : 'خروجی', cur = single && list[0] ? list[0] : { name: '', desc: '' };
   modal({ title: (single && list[0] ? 'ویرایشِ ' : 'افزودنِ ') + lbl, body: '<label class="f"><span>نامِ ' + lbl + '</span><input name="name" value="' + esc(cur.name) + '" required></label><label class="f"><span>توضیح / قالبِ داده (اختیاری)</span><input name="desc" value="' + esc(cur.desc) + '"></label>' +
     (single ? '<p class="mut sm">«کار» فقط یک ' + lbl + ' دارد.</p>' : ''),
     onok: function (f) {
-      var it = { name: $('[name=name]', f).value.trim(), desc: $('[name=desc]', f).value.trim() }; if (!it.name) return false;
+      var it = { name: $('[name=name]', f).value.trim(), desc: $('[name=desc]', f).value.trim(), use: (single && list[0] && list[0].use) || '', unused: !!(single && list[0] && list[0].unused), why: (single && list[0] && list[0].why) || '' }; if (!it.name) return false;
       if (single) list = [it]; else list.push(it);
       var body = { project_id: S.pid, id: id }; body[field] = list;
       return api('node_save', body).then(reload);
@@ -555,16 +586,17 @@ function portDialog(id, field) {
 }
 
 /* ---------- صفحهٔ «کار» (آخرین سطح) ---------- */
-function ioBox(title, list, cls) {
-  var p = list && list[0];
-  return '<div class="iobox ' + cls + '"><div class="io-h">' + title + '</div>' + (p ? '<div class="io-n">' + esc(p.name) + '</div><div class="mut sm">' + esc(p.desc || '') + '</div>' : '<div class="mut sm">تعریف نشده</div>') + '</div>';
+function ioBox(title, list, cls, n, side) {
+  var p = list && list[0], st = p ? E.portStatus(n).filter(function (x) { return x.side === side && x.name === p.name; })[0] : null;
+  return '<div class="iobox ' + cls + '"><div class="io-h">' + title + '</div>' + (p ? '<div class="io-n">' + esc(p.name) + '</div><div class="mut sm">' + esc(p.desc || '') + '</div>' + (p.use ? '<div class="sm">📍 ' + esc(p.use) + '</div>' : '') +
+    '<div class="ps ' + st.state + '" data-act="portdlg" data-id="' + n.id + '" data-side="' + side + '" data-name="' + esc(p.name) + '" style="cursor:pointer;margin-top:6px"><span class="ps-t">' + E.PORT_MSG[st.state] + (st.state === 'unused' && p.why ? ': ' + esc(p.why) : '') + '</span></div>' : '<div class="mut sm">تعریف نشده</div>') + '</div>';
 }
 function taskPage(n) {
   var files = S.P.files.filter(function (f) { return f.node_id === n.id; }), logs = S.P.logs.filter(function (l) { return l.node_id === n.id; }), v = S.sch.info.get(n.id) || {};
   var hasFlow = n.flow && n.flow.nodes && n.flow.nodes.length;
   return '<div class="task"><div class="task-h"><span class="bk-i">' + esc(n.icon || '✔️') + '</span><div class="grow"><h2>' + esc(n.title) + '</h2><div class="mut sm">' + esc(n.summary || '') + '</div></div>' + statusPill(n.status) +
     '<div style="width:140px">' + bar(n.progress) + '<div class="sm mut">' + FA(n.progress) + '٪ · ⏱ ' + fmtDur(nodeTime(n.id)) + '</div></div><button class="btn" data-act="pick" data-id="' + n.id + '">📝 ' + (S.editing ? 'ویرایشِ مشخصات' : 'مشخصات') + '</button></div>' +
-    '<div class="io-row">' + ioBox('⇢ ورودی', n.inputs, 'in') + '<div class="io-arrow">⚙️<small>پردازش</small></div>' + ioBox('⇠ خروجی', n.outputs, 'out') + '</div>' +
+    '<div class="io-row">' + ioBox('⇢ ورودی', n.inputs, 'in', n, 'in') + '<div class="io-arrow">⚙️<small>پردازش</small></div>' + ioBox('⇠ خروجی', n.outputs, 'out', n, 'out') + '</div>' +
     (n.details ? '<div class="card"><h2 class="sec">📄 توضیحات</h2><div class="pre">' + esc(n.details) + '</div></div>' : '') +
     (n.process ? '<div class="card"><h2 class="sec">⚙️ ورودی چطور به خروجی تبدیل می‌شود؟</h2><div class="pre">' + esc(n.process) + '</div></div>' : '') +
     '<div class="card"><h2 class="sec">⎇ فلوچارت <button class="btn sm" data-act="flowedit" data-id="' + n.id + '">' + (S.editing ? (hasFlow ? '✎ ویرایش' : '＋ رسم فلوچارت') : '🔍 بزرگ‌نمایی') + '</button></h2>' +
@@ -868,7 +900,19 @@ function parentSelect(node) {
 function ioRows(kind, list, single) { return (list || []).slice(0, single ? 1 : 99).map(function (r) { return ioRow(kind, r); }).join(''); }
 function ioRow(kind, r) {
   r = r || {};
-  return '<div class="io"><input data-io="' + kind + '-name" placeholder="نام" value="' + esc(r.name || '') + '"><input data-io="' + kind + '-desc" placeholder="توضیح / قالبِ داده" value="' + esc(r.desc || '') + '"><button type="button" class="btn sm ghost danger" data-act="rmrow">×</button></div>';
+  return '<div class="io2"><div class="io"><input data-io="' + kind + '-name" placeholder="نام" value="' + esc(r.name || '') + '"><input data-io="' + kind + '-desc" placeholder="تعریف در خودِ ماژول / قالبِ داده" value="' + esc(r.desc || '') + '"><button type="button" class="btn sm ghost danger" data-act="rmrow">×</button></div>' +
+    '<div class="io io-use"><input data-io="' + kind + '-use" placeholder="کاربردِ آن در همین جایی که به کار رفته (اختصاصیِ این‌جا)" value="' + esc(r.use || '') + '"></div>' +
+    '<div class="io io-un"><label class="unl"><input type="checkbox" data-io="' + kind + '-unused"' + (r.unused ? ' checked' : '') + '> ✗ در اینجا استفاده نمی‌شود</label><input data-io="' + kind + '-why" placeholder="چرا؟ (دلیل لازم است)" value="' + esc(r.why || '') + '"></div></div>';
+}
+function portStatusBlock(n) {
+  var ps = E.portStatus(n); if (!ps.length) return '';
+  var rows = ps.map(function (p) {
+    return '<div class="ps ' + p.state + '"><span class="ps-s">' + (p.side === 'in' ? '⇢' : '⇠') + ' <b>' + esc(p.name) + '</b></span><span class="ps-t">' + E.PORT_MSG[p.state] + (p.state === 'unused' && p.port.why ? ': ' + esc(p.port.why) : '') + '</span>' +
+      '<button type="button" class="btn sm ghost" data-act="portdlg" data-id="' + n.id + '" data-side="' + p.side + '" data-name="' + esc(p.name) + '">جزئیات</button></div>';
+  }).join('');
+  var bad = ps.filter(function (p) { return p.state === 'none' || p.state === 'dangling'; }).length;
+  return '<div class="sub' + (bad ? ' warnsub' : '') + '"><h4>🎯 هدفِ ورودی/خروجی‌ها' + (bad ? ' — ' + FA(bad) + ' مورد بی‌هدف' : ' — همه روشن است ✓') + '</h4>' + rows +
+    '<div class="mut sm">هر ورودی باید در فلوچارت نشان دهد چه پردازشی رویش انجام می‌شود، هر خروجی باید نشان دهد از کجا می‌آید؛ وگرنه «✗ بدون استفاده» با دلیل علامت بخورد.</div></div>';
 }
 function depBlock(id, dir) { // dir: 'in' پیش‌نیازها  |  'out' پس‌نیازها
   var idx = S.idx, list = dir === 'in' ? (idx.inn.get(id) || []) : (idx.out.get(id) || []), ed = S.editing;
@@ -911,7 +955,7 @@ function renderDrawer() {
     '<div class="sub"><h4>⇢ ' + (single ? 'ورودی (فقط یکی)' : 'ورودی‌ها') + '</h4><div id="io-in">' + ioRows('in', n.inputs, single) + '</div>' + (single && (n.inputs || []).length ? '' : '<button type="button" class="btn sm" data-act="addio" data-k="in">＋ ورودی</button>') + '</div>' +
     '<div class="sub"><h4>⇠ ' + (single ? 'خروجی (فقط یکی)' : 'خروجی‌ها') + '</h4><div id="io-out">' + ioRows('out', n.outputs, single) + '</div>' + (single && (n.outputs || []).length ? '' : '<button type="button" class="btn sm" data-act="addio" data-k="out">＋ خروجی</button>') + '</div>' +
     '<label class="f"><span>پردازش (ورودی‌ها چطور به خروجی تبدیل می‌شوند؟)</span><textarea name="process">' + esc(n.process) + '</textarea></label>' +
-    '</fieldset>' +
+    '</fieldset>' + portStatusBlock(n) +
     '<div class="sub"><h4>⎇ فلوچارت (توضیحِ گرافیکیِ پردازش)</h4>' + (hasFlow ?
       '<div class="flthumb" data-act="flowedit" data-id="' + id + '" title="کلیک کنید">' + FLOW.svg(n.flow, { width: '100%', height: 'auto', ink: 'currentColor' }) + '</div><div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">' + (ed ? '✎ ویرایش' : '🔍 بزرگ‌نمایی') + '</button>' + (ed ? '<button type="button" class="btn sm danger" data-act="flowdel" data-id="' + id + '">حذف</button>' : '') + '</div>' :
       (ed ? '<button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">＋ رسمِ فلوچارت</button>' : '<div class="mut sm">فلوچارتی رسم نشده.</div>')) + '</div>' +
@@ -949,7 +993,7 @@ function collectNode(f) {
   ['est_days', 'final_days'].forEach(function (k) { var e = $('[name=' + k + ']', f); if (e) o[k] = e.value === '' ? null : +e.value; });
   var sd = $('[name=start_date]', f); if (sd) o.start_date = J.parse(sd.value);
   ['in', 'out'].forEach(function (k) {
-    o[k === 'in' ? 'inputs' : 'outputs'] = $$('#io-' + k + ' .io', f.parentNode).map(function (r) { return { name: $('[data-io$=name]', r).value, desc: $('[data-io$=desc]', r).value }; });
+    o[k === 'in' ? 'inputs' : 'outputs'] = $$('#io-' + k + ' .io2', f.parentNode).map(function (r) { return { name: $('[data-io$=name]', r).value, desc: $('[data-io$=desc]', r).value, use: $('[data-io$=use]', r).value, unused: $('[data-io$=unused]', r).checked, why: $('[data-io$=why]', r).value }; });
   });
   return o;
 }
@@ -1034,38 +1078,49 @@ function dN(id, parent, kind, title, o) {
   o = o || {};
   var n = { id: id, parent: parent, kind: kind, title: title };
   for (var k in o) n[k] = o[k];
-  if (o.ins) { n.inputs = o.ins.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.ins; }
-  if (o.outs) { n.outputs = o.outs.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.outs; }
+  if (o.ins) { n.inputs = o.ins.map(function (x) { return x && x.name ? x : { name: x[0], desc: x[1] || '' }; }); delete n.ins; }
+  if (o.outs) { n.outputs = o.outs.map(function (x) { return x && x.name ? x : { name: x[0], desc: x[1] || '' }; }); delete n.outs; }
   return n;
 }
 function dF(nodes, edges) {
-  return { v: 1, nodes: nodes.map(function (a) { return { id: a[0], type: a[1], text: a[2], x: a[3], y: a[4], w: a[5] || (a[1] === 'decision' ? 180 : a[1] === 'start' || a[1] === 'end' ? 140 : 170), h: a[6] || (a[1] === 'decision' ? 104 : a[1] === 'start' || a[1] === 'end' ? 52 : 64), color: null }; }),
+  return { v: 1, nodes: nodes.map(function (a) { return { id: a[0], type: a[1], text: a[2], x: a[3], y: a[4], w: a[5] || (a[1] === 'decision' ? 180 : a[1] === 'start' || a[1] === 'end' ? 140 : 170), h: a[6] || (a[1] === 'decision' ? 104 : a[1] === 'start' || a[1] === 'end' ? 52 : 64), color: null, port: a[7] || null }; }),
     edges: edges.map(function (e, i) { return { id: 'e' + (i + 1), from: e[0], to: e[1], label: e[2] || '', color: null }; }) };
 }
 function demoFlows() {
+  var I = function (n) { return { side: 'in', name: n }; }, O = function (n) { return { side: 'out', name: n }; };
   return {
-    login: dF([['s', 'start', 'شروع', 200, 0], ['i', 'io', 'دریافتِ ایمیل و رمز', 185, 100], ['c', 'process', 'یافتنِ کاربر در پایگاه‌داده', 185, 205], ['d', 'decision', 'رمز درست است؟', 180, 315],
-      ['ok', 'process', 'ساختِ نشست و ثبتِ ورود', 480, 335], ['bad', 'process', 'شمارشِ تلاشِ ناموفق', -110, 335], ['lim', 'decision', 'بیش از ۵ بار؟', -115, 460], ['lock', 'process', 'قفلِ موقتِ حساب', -110, 600], ['e', 'end', 'پایان', 500, 480]],
-      [['s', 'i'], ['i', 'c'], ['c', 'd'], ['d', 'ok', 'بله'], ['d', 'bad', 'خیر'], ['bad', 'lim'], ['lim', 'lock', 'بله'], ['lim', 'e', 'خیر'], ['ok', 'e']]),
-    pay: dF([['s', 'start', 'سبدِ تأییدشده', 220, 0], ['t', 'sub', 'ساختِ تراکنش', 205, 100], ['db', 'db', 'ذخیرهٔ تراکنش', 500, 90, 130, 84], ['g', 'process', 'هدایت به درگاه', 205, 215], ['u', 'io', 'بازگشت از درگاه', 200, 320], ['v', 'decision', 'پرداخت موفق؟', 200, 430, 180, 104],
-      ['ok', 'process', 'ثبت سفارش و پیامک', 500, 450], ['no', 'process', 'نمایشِ خطا و تلاشِ دوباره', -110, 450], ['n', 'note', 'تأییدِ نهایی حتماً با verify سمتِ سرور', 500, 570, 200, 90], ['e', 'end', 'پایان', 215, 600]],
-      [['s', 't'], ['t', 'db'], ['t', 'g'], ['g', 'u'], ['u', 'v'], ['v', 'ok', 'بله'], ['v', 'no', 'خیر'], ['ok', 'e']])
+    login: dF([['s', 'start', 'شروع', 200, 0], ['i', 'io', 'دریافتِ ایمیل و رمز', 185, 100, 0, 0, I('ایمیل و رمز')], ['c', 'process', 'یافتنِ کاربر در پایگاه‌داده', 185, 205], ['d', 'decision', 'رمز درست است؟', 180, 315],
+      ['ok', 'process', 'ساختِ نشست و ثبتِ ورود', 480, 335], ['bad', 'process', 'شمارشِ تلاشِ ناموفق', -110, 335], ['lim', 'decision', 'بیش از ۵ بار؟', -115, 460], ['lock', 'process', 'قفلِ موقتِ حساب', -110, 600],
+      ['r', 'io', 'نتیجهٔ بررسی', 190, 640, 0, 0, O('نتیجهٔ بررسی')], ['e', 'end', 'پایان', 205, 740]],
+      [['s', 'i'], ['i', 'c'], ['c', 'd'], ['d', 'ok', 'بله'], ['d', 'bad', 'خیر'], ['bad', 'lim'], ['lim', 'lock', 'بله'], ['lim', 'r', 'خیر'], ['lock', 'r'], ['ok', 'r'], ['r', 'e']]),
+    pay: dF([['s', 'start', 'شروع', 220, 0], ['k', 'io', 'شناسهٔ تراکنش', 190, 100, 0, 0, I('شناسهٔ تراکنش')], ['g', 'process', 'هدایت به درگاه', 205, 215], ['u', 'io', 'بازگشت از درگاه', 200, 320], ['v', 'decision', 'پرداخت موفق؟', 200, 430, 180, 104],
+      ['ok', 'process', 'ثبتِ نتیجهٔ موفق', 500, 450], ['no', 'process', 'ثبتِ نتیجهٔ ناموفق', -110, 450], ['n', 'note', 'تأییدِ نهایی حتماً با verify سمتِ سرور', 500, 570, 200, 90], ['r', 'io', 'نتیجهٔ درگاه', 205, 600, 0, 0, O('نتیجهٔ درگاه')], ['e', 'end', 'پایان', 225, 710]],
+      [['s', 'k'], ['k', 'g'], ['g', 'u'], ['u', 'v'], ['v', 'ok', 'بله'], ['v', 'no', 'خیر'], ['ok', 'r'], ['no', 'r'], ['r', 'e']]),
+    modLogin: dF([['a', 'io', 'ایمیل', 0, 0, 0, 0, I('ایمیل')], ['b', 'io', 'رمز', 0, 110, 0, 0, I('رمز')], ['p', 'sub', 'اعتبارسنجی و ساختِ نشست (زیرمجموعه‌ها)', 280, 50, 210, 70], ['o1', 'io', 'نشست کاربر', 590, 0, 0, 0, O('نشست کاربر')], ['o2', 'io', 'سطح دسترسی', 590, 110, 0, 0, O('سطح دسترسی')]],
+      [['a', 'p'], ['b', 'p'], ['p', 'o1'], ['p', 'o2']]),
+    modPay: dF([['a', 'io', 'مبلغ', 0, 0, 0, 0, I('مبلغ')], ['b', 'io', 'اقلامِ سبد', 0, 110, 0, 0, I('اقلامِ سبد')], ['p', 'sub', 'تراکنش، درگاه و تأییدِ سرور', 280, 50, 210, 70], ['o', 'io', 'وضعیتِ پرداخت', 590, 50, 0, 0, O('وضعیتِ پرداخت')]],
+      [['a', 'p'], ['b', 'p'], ['p', 'o']]),
+    modSms: dF([['a', 'io', 'شماره', 0, 0, 0, 0, I('شماره')], ['b', 'io', 'متن', 0, 110, 0, 0, I('متن')], ['p', 'process', 'ارسال با تلاشِ دوباره', 280, 50, 210, 70], ['o', 'io', 'وضعیتِ ارسال', 590, 50, 0, 0, O('وضعیتِ ارسال')]],
+      [['a', 'p'], ['b', 'p'], ['p', 'o']]),
+    er1: dF([['i', 'io', 'نیازمندی‌ها', 0, 0, 0, 0, I('نیازمندی‌ها')], ['p', 'process', 'استخراجِ موجودیت‌ها و ارتباط‌ها', 260, 0, 200, 64], ['o', 'io', 'نمودارِ ER', 560, 0, 0, 0, O('نمودارِ ER')]], [['i', 'p'], ['p', 'o']]),
+    er2: dF([['i', 'io', 'نمودارِ ER', 0, 0, 0, 0, I('نمودارِ ER')], ['p', 'process', 'نوشتنِ مهاجرت‌های SQL', 260, 0, 200, 64], ['o', 'io', 'اسکیمای SQL', 560, 0, 0, 0, O('اسکیمای SQL')]], [['i', 'p'], ['p', 'o']]),
+    mdl: dF([['i', 'io', 'نیازمندی‌ها', 0, 0, 0, 0, I('نیازمندی‌ها')], ['p', 'sub', 'مدل‌سازی و مهاجرت (کارهای زیرین)', 260, 0, 220, 70], ['o', 'io', 'اسکیمای SQL', 580, 0, 0, 0, O('اسکیمای SQL')]], [['i', 'p'], ['p', 'o']])
   };
 }
 /* ماژول‌های کتابخانه */
 function libDemoDoc() {
   var fl = demoFlows(), N = dN;
   return { nodes: [
-    N('L1', null, 'module', 'ورود کاربر', { icon: '🔐', color: '#7a5af8', summary: 'اعتبارسنجی، نشست و محدودیتِ تلاش', ins: [['ایمیل'], ['رمز']], outs: [['نشست کاربر'], ['سطح دسترسی']], process: 'ایمیل و رمز اعتبارسنجی می‌شود؛ در صورتِ درستی نشستِ امن ساخته می‌شود.', est_days: 4 }),
+    N('L1', null, 'module', 'ورود کاربر', { icon: '🔐', color: '#7a5af8', summary: 'اعتبارسنجی، نشست و محدودیتِ تلاش', ins: [['ایمیل'], ['رمز']], outs: [['نشست کاربر'], ['سطح دسترسی']], process: 'ایمیل و رمز اعتبارسنجی می‌شود؛ در صورتِ درستی نشستِ امن ساخته می‌شود.', flow: fl.modLogin, est_days: 4 }),
     N('L1s1', 'L1', 'section', 'اعتبارسنجی', { icon: '🛡️' }),
     N('L1t1', 'L1s1', 'task', 'بررسیِ رمز', { ins: [['ایمیل و رمز']], outs: [['نتیجهٔ بررسی']], flow: fl.login, process: 'رمزِ واردشده با هشِ ذخیره‌شده مقایسه می‌شود؛ اگر نادرست بود شمارندهٔ تلاش بالا می‌رود و بیش از ۵ بار حساب قفل می‌شود.', est_days: 1.5 }),
     N('L1t2', 'L1s1', 'task', 'محدودیتِ تلاش', { ins: [['تعدادِ تلاش']], outs: [['وضعیتِ قفل']], est_days: 1 }),
     N('L1t3', 'L1', 'task', 'ساختِ نشست', { ins: [['کاربرِ معتبر']], outs: [['کوکیِ نشست']], est_days: 1 }),
-    N('L2', null, 'module', 'پرداختِ آنلاین', { icon: '💳', color: '#d64545', summary: 'اتصال به درگاه و تأییدِ پرداخت', ins: [['مبلغ'], ['اقلامِ سبد']], outs: [['وضعیتِ پرداخت']], process: 'تراکنش ساخته می‌شود، کاربر به درگاه می‌رود و پس از بازگشت، پرداخت سمتِ سرور تأیید می‌شود.', est_days: 6 }),
+    N('L2', null, 'module', 'پرداختِ آنلاین', { icon: '💳', color: '#d64545', summary: 'اتصال به درگاه و تأییدِ پرداخت', ins: [['مبلغ'], ['اقلامِ سبد']], outs: [['وضعیتِ پرداخت']], process: 'تراکنش ساخته می‌شود، کاربر به درگاه می‌رود و پس از بازگشت، پرداخت سمتِ سرور تأیید می‌شود.', flow: fl.modPay, est_days: 6 }),
     N('L2t1', 'L2', 'task', 'ساختِ تراکنش', { ins: [['مبلغ']], outs: [['شناسهٔ تراکنش']], est_days: 1 }),
     N('L2t2', 'L2', 'task', 'درگاه و بازگشت', { ins: [['شناسهٔ تراکنش']], outs: [['نتیجهٔ درگاه']], flow: fl.pay, est_days: 3 }),
     N('L2t3', 'L2', 'task', 'تأییدِ سمتِ سرور', { ins: [['نتیجهٔ درگاه']], outs: [['وضعیتِ پرداخت']], est_days: 1 }),
-    N('L3', null, 'module', 'اعلانِ پیامکی', { icon: '🔔', color: '#14a3a3', summary: 'ارسالِ پیامک با تلاشِ دوباره', ins: [['شماره'], ['متن']], outs: [['وضعیتِ ارسال']], est_days: 3 }),
+    N('L3', null, 'module', 'اعلانِ پیامکی', { icon: '🔔', color: '#14a3a3', summary: 'ارسالِ پیامک با تلاشِ دوباره', ins: [['شماره'], ['متن']], outs: [['وضعیتِ ارسال']], flow: fl.modSms, est_days: 3 }),
     N('L3t1', 'L3', 'task', 'ارسال با تلاشِ دوباره', { ins: [['پیام']], outs: [['وضعیتِ ارسال']], est_days: 2 })],
     dependencies: [{ from: 'L1t1', to: 'L1t3', out: 'نتیجهٔ بررسی', 'in': 'کاربرِ معتبر', label: 'اگر درست بود' }, { from: 'L1t1', to: 'L1t2', out: 'نتیجهٔ بررسی', 'in': 'تعدادِ تلاش' },
       { from: 'L2t1', to: 'L2t2', out: 'شناسهٔ تراکنش', 'in': 'شناسهٔ تراکنش' }, { from: 'L2t2', to: 'L2t3', out: 'نتیجهٔ درگاه', 'in': 'نتیجهٔ درگاه' }] };
@@ -1076,14 +1131,14 @@ function sampleDoc() {
   var nodes = [
     N('A', null, 'area', 'هسته و زیرساخت', { icon: '🏗️', color: '#2f6fed', x: 760, y: 280, summary: 'پایگاه‌داده، ورود و دسترسی‌ها', ins: [['نیازمندی‌ها']], outs: [['اسکیمای SQL'], ['نشست کاربر']] }),
     N('A1', 'A', 'section', 'پایگاه‌داده', { icon: '🗄️' }),
-    N('A1m', 'A1', 'module', 'طراحیِ اسکیما', { icon: '🧩', summary: 'جدول‌ها، رابطه‌ها و مهاجرت‌ها', ins: [['نیازمندی‌ها']], outs: [['اسکیمای SQL']], process: 'مدل‌سازی ER، نرمال‌سازی تا ۳NF و نوشتنِ مهاجرت‌ها.', tech: 'MySQL 8 · utf8mb4 · حذفِ نرم برای سفارش و محصول', status: 'doing', progress: 85 }),
-    N('A1t1', 'A1m', 'task', 'مدلِ ER', { icon: '✔️', summary: 'نمودارِ موجودیت‌ها', ins: [['نیازمندی‌ها']], outs: [['نمودارِ ER']], status: 'done', progress: 100, final_days: 2, start_date: D(-12), assignee: 'سارا', details: 'کاربر، محصول، سفارش، پرداخت و رابطه‌هایشان.', process: 'از فهرستِ نیازمندی‌ها موجودیت‌ها و ارتباط‌ها استخراج و نرمال‌سازی می‌شود.' }),
-    N('A1t2', 'A1m', 'task', 'نوشتنِ مهاجرت‌ها', { icon: '✔️', summary: 'فایل‌های SQL', ins: [['نمودارِ ER']], outs: [['اسکیمای SQL']], status: 'doing', progress: 70, est_days: 2, final_days: 2.5, start_date: D(-10), assignee: 'سارا' }),
+    N('A1m', 'A1', 'module', 'طراحیِ اسکیما', { icon: '🧩', summary: 'جدول‌ها، رابطه‌ها و مهاجرت‌ها', ins: [['نیازمندی‌ها']], outs: [['اسکیمای SQL']], process: 'مدل‌سازی ER، نرمال‌سازی تا ۳NF و نوشتنِ مهاجرت‌ها.', tech: 'MySQL 8 · utf8mb4 · حذفِ نرم برای سفارش و محصول', flow: fl.mdl, status: 'doing', progress: 85 }),
+    N('A1t1', 'A1m', 'task', 'مدلِ ER', { icon: '✔️', summary: 'نمودارِ موجودیت‌ها', ins: [['نیازمندی‌ها']], outs: [['نمودارِ ER']], status: 'done', progress: 100, final_days: 2, start_date: D(-12), assignee: 'سارا', details: 'کاربر، محصول، سفارش، پرداخت و رابطه‌هایشان.', process: 'از فهرستِ نیازمندی‌ها موجودیت‌ها و ارتباط‌ها استخراج و نرمال‌سازی می‌شود.', flow: fl.er1 }),
+    N('A1t2', 'A1m', 'task', 'نوشتنِ مهاجرت‌ها', { icon: '✔️', summary: 'فایل‌های SQL', ins: [['نمودارِ ER']], outs: [['اسکیمای SQL']], status: 'doing', progress: 70, est_days: 2, final_days: 2.5, start_date: D(-10), assignee: 'سارا', flow: fl.er2 }),
     N('A2', 'A', 'section', 'احراز هویت', { icon: '🔑' }),
     N('A2t', 'A2', 'task', 'صفحهٔ ورود (UI)', { icon: '✔️', summary: 'فرمِ ورود و بازیابیِ رمز', ins: [['نشست کاربر']], outs: [['صفحهٔ ورود']], est_days: 2, status: 'todo' }),
     N('B', null, 'area', 'کاتالوگ', { icon: '🛍️', color: '#1f9d63', x: 330, y: 20, summary: 'محصولات و جست‌وجو', ins: [['اسکیمای SQL']], outs: [['فهرست محصولات']] }),
     N('B1', 'B', 'section', 'محصول', { icon: '📦' }),
-    N('B1m', 'B1', 'module', 'مدیریتِ محصول', { icon: '📦', summary: 'ساخت و ویرایشِ محصول با تصویر', ins: [['اسکیمای SQL'], ['سطحِ دسترسی']], outs: [['فهرست محصولات']], process: 'فرمِ محصول، تنوع (رنگ/سایز)، موجودی و آپلودِ تصویر.', status: 'review', progress: 90, assignee: 'مریم' }),
+    N('B1m', 'B1', 'module', 'مدیریتِ محصول', { icon: '📦', summary: 'ساخت و ویرایشِ محصول با تصویر', ins: [['اسکیمای SQL'], { name: 'سطحِ دسترسی', desc: '', use: '', unused: true, why: 'فعلاً همهٔ مدیرها یک دسترسی دارند؛ در نسخهٔ بعد استفاده می‌شود' }], outs: [['فهرست محصولات']], process: 'فرمِ محصول، تنوع (رنگ/سایز)، موجودی و آپلودِ تصویر.', status: 'review', progress: 90, assignee: 'مریم' }),
     N('B1t1', 'B1m', 'task', 'فرمِ محصول', { icon: '✔️', ins: [['اسکیمای SQL']], outs: [['محصولِ ذخیره‌شده']], status: 'done', progress: 100, final_days: 2, start_date: D(-3) }),
     N('B1t2', 'B1m', 'task', 'آپلودِ تصویر', { icon: '✔️', ins: [['فایلِ تصویر']], outs: [['نشانیِ تصویر']], status: 'review', progress: 80, est_days: 2 }),
     N('B1n', 'B1', 'module', 'جست‌وجو و فیلتر', { icon: '🔍', summary: 'جست‌وجوی سریع با فیلترها', ins: [['فهرست محصولات']], outs: [['نتایجِ مرتب']], est_days: 4, status: 'todo', process: 'نمایه‌سازیِ عنوان/برچسب، رتبه‌بندی و صفحه‌بندی.' }),
@@ -1135,6 +1190,16 @@ function runSample() {
       .then(function (b) { ids.pay = b.id; return Promise.all([
         api('dep_save', { project_id: pid, from_id: by['سبدِ خرید'].id, to_id: ids.pay, out_name: 'اقلامِ سبد', in_name: 'اقلامِ سبد' }),
         api('dep_save', { project_id: pid, from_id: ids.pay, to_id: by['ثبت و پیگیریِ سفارش'].id, out_name: 'وضعیتِ پرداخت', in_name: 'وضعیتِ پرداخت' })]); })
+      .then(function () { return api('project_get', { project_id: pid }); })
+      .then(function (P2) {
+        var setUse = function (id, use, unused) {
+          var n = P2.nodes.filter(function (x) { return x.id === id; })[0], upd = function (list) { return list.map(function (p) { var u = use[p.name]; if (!u) return p; return u.unused ? Object.assign({}, p, { unused: true, why: u.why }) : Object.assign({}, p, { use: u }); }); };
+          return api('node_save', { project_id: pid, id: id, inputs: upd(n.inputs), outputs: upd(n.outputs) });
+        };
+        return Promise.all([
+          setUse(ids.login, { 'ایمیل': 'ایمیلِ مشتری از فرمِ ورودیِ سایت', 'رمز': 'همان فرمِ ورود', 'نشست کاربر': 'به سبد خرید و پنلِ کاربر داده می‌شود', 'سطح دسترسی': { unused: true, why: 'در این پروژه همهٔ مشتری‌ها یک نقش دارند' } }),
+          setUse(ids.pay, { 'مبلغ': 'جمعِ سبد پس از تخفیف', 'اقلامِ سبد': 'از ماژولِ «سبدِ خرید»', 'وضعیتِ پرداخت': 'به «ثبت و پیگیریِ سفارش» می‌رود' })]);
+      })
       .then(function () {
         var n = by['طراحیِ اسکیما'], t = by['مدلِ ER'];
         var adds = [[t.id, 3600], [t.id, 1800], [n.id, 2400], [by['نوشتنِ مهاجرت‌ها'].id, 3600], [by['نوشتنِ مهاجرت‌ها'].id, 2700], [by['فرمِ محصول'].id, 3000], [0, 1500]];
@@ -1190,6 +1255,7 @@ function updTick() {
 function elId(el) { return +el.getAttribute('data-id'); }
 var ACTS = {
   noop: function () {},
+  portdlg: function (el) { portDialog2(elId(el), el.getAttribute('data-side'), el.getAttribute('data-name')); },
   menu: function (el, ev) {
     var mm = el.closest('.mm'), was = mm.classList.contains('open');
     $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });
@@ -1231,7 +1297,11 @@ var ACTS = {
     var id = forId || elId(el), n = S.idx.byId.get(id); if (!n) return;
     var ro = !S.editing;
     if (ro && !(n.flow && n.flow.nodes && n.flow.nodes.length)) return toast('این بخش فلوچارتی ندارد' + (ro ? ' — برای رسم «✎ ویرایش» را بزنید' : ''), true);
-    FLOW.edit({ title: n.title, flow: n.flow, toast: toast, readonly: ro,
+    FLOW.edit({ title: n.title, flow: n.flow, toast: toast, readonly: ro, ports: { inputs: n.inputs, outputs: n.outputs },
+      onUnused: function (side, name, un, why) {
+        var field = side === 'in' ? 'inputs' : 'outputs', nl = (S.idx.byId.get(id)[field] || []).map(function (x) { return x.name === name ? { name: x.name, desc: x.desc, use: x.use, unused: un, why: un ? why : '' } : x; });
+        var b = { project_id: S.pid, id: id }; b[field] = nl; return api('node_save', b).then(function () { return loadProject(S.pid); });
+      },
       onSave: function (flow) { return api('node_save', { project_id: S.pid, id: id, flow: flow }).then(function () { toast('فلوچارت ذخیره شد'); return loadProject(S.pid); }); },
       onClose: function () { render(true); } });
   },
@@ -1263,7 +1333,7 @@ var ACTS = {
   delnode: function (el) { var n = S.idx.byId.get(elId(el)), k = S.idx.descendants(n.id).length; if (!confirm('«' + n.title + '»' + (k ? ' و ' + FA(k) + ' زیرمجموعه‌اش' : '') + ' (با گزارش‌ها و پیوست‌ها) پاک شود؟')) return; return api('node_delete', { project_id: S.pid, id: n.id }).then(function () { S.sel = 0; return reload(); }); },
   deldep: function (el) { return api('dep_delete', { project_id: S.pid, id: elId(el) }).then(reload); },
   addio: function (el) { var k = el.getAttribute('data-k'), box = $('#io-' + k); box.insertAdjacentHTML('beforeend', ioRow(k)); box.lastChild.firstChild.focus(); },
-  rmrow: function (el) { el.parentNode.remove(); },
+  rmrow: function (el) { var r = el.closest('.io2'); (r || el.parentNode).remove(); },
   zoom: function (el) { S.zoom = el.getAttribute('data-v'); S._gToday = null; renderContent(true); },
   critbox: function (el) { S.crit = el.checked; renderContent(true); },
   gotoday: function () { var g = $('.gscroll'); if (g) g.scrollLeft = Math.max(0, S._gToday - 160); },

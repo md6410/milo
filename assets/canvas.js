@@ -225,7 +225,7 @@
       if (!it.ghost && !C.ro) inner += '<i class="cvp p-t" data-p="t"></i><i class="cvp p-r" data-p="r"></i><i class="cvp p-b" data-p="b"></i><i class="cvp p-l" data-p="l"></i>';
       if (it.ports) ['in', 'out'].forEach(function (side) {
         (it.ports[side] || []).forEach(function (p) {
-          inner += '<i class="cvpt ' + side + '" data-pt="' + side + '" data-name="' + esc(p.name) + '" style="top:' + p.y + 'px" title="' + (side === 'in' ? 'ورودی: ' : 'خروجی: ') + esc(p.name) + '"></i>';
+          inner += '<i class="cvpt ' + side + (p.unused ? ' unused' : '') + (p.warn ? ' warn' : '') + '" data-pt="' + side + '" data-name="' + esc(p.name) + '" style="top:' + p.y + 'px" title="' + (side === 'in' ? 'ورودی: ' : 'خروجی: ') + esc(p.name) + (p.tip ? ' — ' + esc(p.tip) : '') + ' (کلیک = جزئیات)"></i>';
         });
       });
       el.innerHTML = inner;
@@ -432,6 +432,7 @@
       var lh = e.target.closest ? e.target.closest('.cvl') : null;
       var lbl = e.target.closest ? e.target.closest('.cv-lbl') : null;
       host.setPointerCapture(e.pointerId);
+      if (pt && it && C.ro) { drag = { t: 'portclick', from: it, fromSide: pt.getAttribute('data-pt'), fromName: pt.getAttribute('data-name'), sx: e.clientX, sy: e.clientY, moved: false }; return; }
       if ((port || pt) && it && !C.ro) { drag = { t: 'link', from: it, fromSide: pt ? pt.getAttribute('data-pt') : null, fromName: pt ? pt.getAttribute('data-name') : null, sx: e.clientX, sy: e.clientY, moved: false }; return; }
       if (it) {
         if (e.shiftKey) { var ids = C.selectedIds(); var i = ids.indexOf(it.id); if (i >= 0) ids.splice(i, 1); else ids.push(it.id); setSel(ids); }
@@ -482,9 +483,11 @@
       } else if (d.t === 'pan' && !d.moved) {
         if (C.armed && o.onPlace && !C.ro) { o.onPlace(C.armed, toWorld(e.clientX, e.clientY)); return; }
         setSel([]);
+      } else if (d.t === 'portclick') {
+        if (o.onPortClick && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 5) o.onPortClick(d.from, d.fromSide, d.fromName);
       } else if (d.t === 'link') {
         tmpLayer.innerHTML = ''; for (var i in itemEl) itemEl[i].classList.remove('drop'); $$pts(host, null);
-        if (!d.moved) return;
+        if (!d.moved) { if (d.fromSide && o.onPortClick) o.onPortClick(d.from, d.fromSide, d.fromName); return; }
         var under = document.elementFromPoint(e.clientX, e.clientY), tgt = under && under.closest ? under.closest('.cvi') : null;
         var tpt = under && under.closest ? under.closest('.cvpt') : null;
         if (tgt && tgt.getAttribute('data-id') !== d.from.id) {

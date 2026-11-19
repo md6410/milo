@@ -13,6 +13,7 @@
     note:    { name: 'یادداشت',     shape: 'note',    w: 170, h: 90, color: '#d4a514' },
     text:    { name: 'متن',         shape: 'rect',    w: 150, h: 36, color: null }
   };
+  var PORT_COL = { 'in': '#1f9d63', out: '#e0912b' };
   var ORDER = ['start', 'process', 'decision', 'io', 'sub', 'db', 'note', 'text', 'end'];
   var CYCLE = ['process', 'decision', 'io', 'sub', 'db', 'note'];
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -56,9 +57,11 @@
     nodes.forEach(function (n) {
       var col = colorOf(n) || ink, t = TYPES[n.type] || TYPES.process;
       s += '<g transform="translate(' + n.x + ' ' + n.y + ')">';
+      if (n.port) col = n.color || PORT_COL[n.port.side];
       if (n.type !== 'text') s += '<path d="' + CV.shapePath(t.shape, n.w, n.h) + '" fill="' + col + '" fill-opacity=".16" stroke="' + col + '" stroke-width="2" stroke-linejoin="round"/>';
       var lines = wrap(n.text, n.w * (n.type === 'decision' ? 0.62 : 0.86), fs), y0 = n.h / 2 - (lines.length - 1) * 8 + 4;
       lines.forEach(function (ln, i) { s += '<text x="' + n.w / 2 + '" y="' + (y0 + i * 16) + '" font-size="' + fs + '" text-anchor="middle" fill="' + ink + '">' + esc(ln) + '</text>'; });
+      if (n.port) s += '<text x="' + (n.w - 8) + '" y="-4" font-size="10.5" text-anchor="end" fill="' + (PORT_COL[n.port.side]) + '">' + (n.port.side === 'in' ? '⇢ ورودی' : '⇠ خروجی') + '</text>';
       s += '</g>';
     });
     return s + '</svg>';
@@ -94,19 +97,53 @@
       '<button class="btn sm" data-a="zout">－</button><button class="btn sm" data-a="fit">جا بده</button><button class="btn sm" data-a="zin">＋</button>' +
       '<button class="btn sm" data-a="svg">⬇ تصویر SVG</button><button class="btn sm" data-a="mmd">کپی Mermaid</button>' +
       (RO ? '' : '<button class="btn sm pri" data-a="save">ذخیره</button><button class="btn sm" data-a="saveclose">ذخیره و بستن</button>') + '<button class="btn sm" data-a="close">✕ بستن</button></div>' +
-      '<div class="fl-body">' + (RO ? '' : '<div class="fl-pal">' + pal + '<div class="fl-hint">دوبار کلیک روی بوم = شکلِ تازه<br>از نقطهٔ کنارِ هر شکل بکشید و روی شکلِ دیگر رها کنید = اتصال<br>رها کردن روی جای خالی = شکل + اتصال<br>روی شکل/پیکان کلیک کنید تا رنگ و ابزار بیاید<br>Shift+کشیدن = انتخابِ چندتایی</div></div>') + '<div class="fl-cv"></div></div>';
+      '<div class="fl-body">' + (RO ? '' : '<div class="fl-pal">' + pal + '<div class="fl-ports"></div><div class="fl-hint">دوبار کلیک روی بوم = شکلِ تازه<br>از نقطهٔ کنارِ هر شکل بکشید و روی شکلِ دیگر رها کنید = اتصال<br>رها کردن روی جای خالی = شکل + اتصال<br>روی شکل/پیکان کلیک کنید تا رنگ و ابزار بیاید<br>Shift+کشیدن = انتخابِ چندتایی</div></div>') + '<div class="fl-cv"></div></div>';
     document.body.appendChild(ov);
     var host = ov.querySelector('.fl-cv');
 
+    var ports = { 'in': clone((opt.ports && opt.ports.inputs) || []), out: clone((opt.ports && opt.ports.outputs) || []) };
+    function boundNode(side, name) { for (var i = 0; i < data.nodes.length; i++) { var n = data.nodes[i]; if (n.port && n.port.side === side && n.port.name === name) return n; } return null; }
+    function portState(side, p) {
+      if (p.unused) return 'unused';
+      var b = boundNode(side, p.name); if (!b) return 'none';
+      return data.edges.some(function (e) { return side === 'in' ? e.from === b.id : e.to === b.id; }) ? 'ok' : 'dangling';
+    }
+    var ST_TXT = { ok: '✓ تعریف شده', unused: '✗ بدون استفاده', none: '⚠ هدف مشخص نیست', dangling: '⚠ به چیزی وصل نیست' };
+    function renderPorts() {
+      var box = ov.querySelector('.fl-ports'); if (!box) return;
+      var html = '';
+      ['in', 'out'].forEach(function (side) {
+        ports[side].forEach(function (p) {
+          var st = portState(side, p);
+          html += '<div class="fl-pr ' + st + '"><button type="button" class="fl-pchip ' + side + '" data-port="' + side + ':' + esc(p.name) + '" title="' + (side === 'in' ? 'ورودی' : 'خروجی') + ' — ' + ST_TXT[st] + (p.why ? ': ' + esc(p.why) : '') + '">' + (side === 'in' ? '⇢' : '⇠') + ' ' + esc(p.name) + '</button><span class="fl-pst">' + ST_TXT[st] + '</span>' +
+            '<button type="button" class="fl-px' + (p.unused ? ' on' : '') + '" data-px="' + side + ':' + esc(p.name) + '" title="' + (p.unused ? 'از حالتِ «بدون استفاده» درآور' : 'این ' + (side === 'in' ? 'ورودی' : 'خروجی') + ' در اینجا استفاده نمی‌شود') + '">✗</button></div>';
+        });
+      });
+      box.innerHTML = html ? '<div class="fl-ph">ورودی/خروجی‌های این بخش<br><span>هرکدام باید اینجا پردازش/منشأ داشته باشد یا ✗ بخورد</span></div>' + html : '<div class="fl-ph">این بخش ورودی/خروجی ندارد</div>';
+    }
+    function addPortNode(side, name) {
+      var ex = boundNode(side, name);
+      if (ex) { cv.select([ex.id]); cv.focusItem(ex.id); return; }
+      var c = cv.centerOf(), t = TYPES.io, n = { id: uid(data.nodes, 'n'), type: 'io', text: name, x: Math.round((c.x - t.w / 2 + (side === 'in' ? -230 : 230)) / 10) * 10, y: Math.round((c.y - 120 + data.nodes.filter(function (q) { return q.port && q.port.side === side; }).length * 100) / 10) * 10, w: t.w, h: t.h, color: null, port: { side: side, name: name } };
+      data.nodes.push(n); commit(); render(false); cv.select([n.id]);
+    }
+    function toggleUnused(side, name) {
+      var p = ports[side].filter(function (x) { return x.name === name; })[0]; if (!p) return;
+      var why = '', un = !p.unused;
+      if (un) { why = prompt('چرا این ' + (side === 'in' ? 'ورودی' : 'خروجی') + ' «' + name + '» در اینجا استفاده نمی‌شود؟ (توضیح بنویسید)', p.why || ''); if (why === null) return; if (!String(why).trim()) { alert('نوشتنِ دلیل لازم است.'); return; } }
+      Promise.resolve(opt.onUnused ? opt.onUnused(side, name, un, why) : null).then(function () { p.unused = un; p.why = un ? why : ''; renderPorts(); });
+    }
     function model() {
       var items = data.nodes.map(function (n) {
         var t = TYPES[n.type] || TYPES.process;
-        return { id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, shape: t.shape, color: n.type === 'text' ? null : colorOf(n), text: n.text, cls: 'fl-' + n.type };
+        var it = { id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, shape: t.shape, color: n.type === 'text' ? null : colorOf(n), text: n.text, cls: 'fl-' + n.type };
+        if (n.port) { it.color = n.color || PORT_COL[n.port.side]; it.html = '<span class="pb ' + n.port.side + '">' + (n.port.side === 'in' ? '⇢ ورودی' : '⇠ خروجی') + '</span>' + esc(n.text); it.cls += ' fl-bound'; }
+        return it;
       });
       var links = data.edges.map(function (e) { return { id: e.id, from: e.from, to: e.to, label: e.label, color: e.color }; });
       return { items: items, links: links };
     }
-    function render(keepSel) { var m = model(); var sel = cv.selectedIds(); cv.setData(m.items, m.links, keepSel); if (keepSel) cv.select(sel.filter(function (i) { return data.nodes.some(function (n) { return n.id === i; }); })); empty(); }
+    function render(keepSel) { renderPorts(); var m = model(); var sel = cv.selectedIds(); cv.setData(m.items, m.links, keepSel); if (keepSel) cv.select(sel.filter(function (i) { return data.nodes.some(function (n) { return n.id === i; }); })); empty(); }
     function empty() {
       var e = host.querySelector('.fl-empty');
       if (data.nodes.length) { if (e) e.remove(); return; }
@@ -170,6 +207,7 @@
       itemActions: function (it) {
         var n = nodeById(it.id); if (!n) return [];
         var acts = [];
+        if (n.port) acts.push({ icon: '✂', title: 'جداکردن از ورودی/خروجی', fn: function () { n.port = null; commit(); render(true); } });
         if (CYCLE.indexOf(n.type) >= 0) acts.push({ icon: '⬡', title: 'تغییرِ شکل', fn: function () { n.type = CYCLE[(CYCLE.indexOf(n.type) + 1) % CYCLE.length]; var t = TYPES[n.type]; n.w = Math.max(n.w, t.w * 0.8); n.h = Math.max(n.h, t.h * 0.8); if (n.type === 'decision') n.h = Math.max(n.h, 96); commit(); render(true); } });
         acts.push({ icon: '⊕', title: 'بزرگ‌تر', fn: function () { n.w = Math.round(n.w * 1.2); n.h = Math.round(n.h * 1.2); commit(); render(true); } });
         acts.push({ icon: '⊖', title: 'کوچک‌تر', fn: function () { n.w = Math.max(60, Math.round(n.w / 1.2)); n.h = Math.max(34, Math.round(n.h / 1.2)); commit(); render(true); } });
@@ -192,6 +230,9 @@
 
     ov.addEventListener('click', function (e) {
       var b = e.target.closest('[data-a]'), p = e.target.closest('.fl-p');
+      var pc = e.target.closest('[data-port]'), px = e.target.closest('[data-px]');
+      if (pc) { var pv = pc.getAttribute('data-port').split(':'); addPortNode(pv[0], pv.slice(1).join(':')); return; }
+      if (px) { var xv = px.getAttribute('data-px').split(':'); toggleUnused(xv[0], xv.slice(1).join(':')); return; }
       if (p) { var c = cv.centerOf(); var jitter = (cnt++ % 6) * 24; addNode(p.getAttribute('data-t'), c.x + jitter, c.y + jitter, true); return; }
       if (!b) return;
       var a = b.getAttribute('data-a');

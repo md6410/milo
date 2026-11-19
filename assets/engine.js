@@ -135,6 +135,35 @@
     return { info: info, order: order, pStart: pStart, end: end, cycle: cycle, today: today, root: root, preds: preds };
   }
 
+  /* ---------- هدفِ ورودی/خروجی‌ها ---------- */
+  /* هر ورودی/خروجی باید یا در فلوچارتِ همان بخش پردازش/منشأ داشته باشد، یا صریحاً «بدون استفاده» (با دلیل) علامت بخورد. */
+  function portStatus(n) {
+    var out = [], f = n.flow && n.flow.nodes ? n.flow : null;
+    [['in', n.inputs], ['out', n.outputs]].forEach(function (pair) {
+      var side = pair[0];
+      (pair[1] || []).forEach(function (p) {
+        var st;
+        if (p.unused) st = { state: 'unused' };
+        else {
+          var bound = f ? f.nodes.filter(function (b) { return b.port && b.port.side === side && b.port.name === p.name; }) : [];
+          if (!bound.length) st = { state: 'none' };
+          else st = { state: bound.some(function (b) { return (f.edges || []).some(function (e) { return side === 'in' ? e.from === b.id : e.to === b.id; }); }) ? 'ok' : 'dangling' };
+        }
+        st.side = side; st.name = p.name; st.port = p; out.push(st);
+      });
+    });
+    return out;
+  }
+  var PORT_MSG = { ok: '✓ در فلوچارت تعریف شده', unused: '✗ بدون استفاده', none: '⚠ هدف مشخص نیست — در فلوچارت نیامده و «بدون استفاده» هم علامت نخورده', dangling: '⚠ در فلوچارت هست ولی به چیزی وصل نیست' };
+  function portIssues(idx) {
+    var out = [];
+    idx.preorder.forEach(function (id) {
+      var n = idx.byId.get(id), bad = portStatus(n).filter(function (s) { return s.state === 'none' || s.state === 'dangling'; });
+      if (bad.length) out.push({ id: id, title: n.title, path: idx.pathText(id), ports: bad });
+    });
+    return out;
+  }
+
   /* ---------- خروجی هوش مصنوعی ---------- */
   var AI_INSTRUCTIONS = [
     'This file is the complete specification of a software/project plan exported from "Project Manager" (schema weby-projectmanager/1).',
@@ -144,6 +173,7 @@
     'RULE 1 - STRUCTURE CHANGES: if you change the structure in any way (add, remove, rename or split nodes; change inputs/outputs/process; add or remove dependencies; change estimates or milestones) you MUST deliver an updated copy of THIS file in the same schema so the user can import it back. Keep every existing "id" unchanged. New nodes get a temporary string id such as "new-1" (usable as "parent" and in dependencies). To remove something set "deleted": true on it. Returning only the changed items is accepted; the full file is preferred. Never change "schema".',
     'RULE 2 - WORK REPORT: after you finish (or partly finish) work, add an entry to the top-level "work_report" array for EVERY node you worked on, and deliver the file. Entry format: {"node": <id>, "status": "todo|doing|review|done|blocked|hold", "progress": 0-100, "summary": "...", "how": "how it was implemented", "files_changed": ["path"], "decisions": ["..."], "how_to_test": "...", "deviations": "...", "remaining": "...", "actual_days": optional number}. Be honest: mark done only what really works. The user imports the file and the timeline, progress and per-node history update automatically.',
     'DELIVERY: always hand the result back as a downloadable UTF-8 JSON file named "<project>-updated.pm.json" (valid JSON, no comments) plus a short summary in chat. Write all human-readable text in the language of the existing content (Persian unless the file says otherwise).',
+    'PORT PURPOSE RULE: every input and output of a node must have a purpose. Either define it in the node\'s "flow": a flow node (type io) with "port":{"side":"in"|"out","name":"<exact port name>"}; an input must have an outgoing edge (what is done with it) and an output must have an incoming edge (where it comes from). Or mark the port unused: {"unused":true,"why":"reason"}. Ports have "desc" (definition inside the module) and "use" (what it means in THIS place where the module is used) - fill "use" for module instances. "port_issues" lists the ports that currently have no purpose; fix them.',
     'VISUAL FIELDS: x, y, color (#rrggbb) and icon on a node are canvas layout hints - keep them unchanged (new nodes may omit them). "flow" is an optional flowchart that explains the node\'s process graphically: {"nodes":[{"id","type","text","x","y","w","h"}],"edges":[{"id","from","to","label"}]} with type one of start,end,process,decision,io,sub,db,note,text (edge labels on a decision are usually yes/no). Follow it when implementing; if you change the process, update the flow too, and you may add a flow to a node that has none.',
     'Never invent ids for existing nodes, never drop the "id" of an existing item, and never put secrets or passwords in the file.'
   ];
@@ -168,6 +198,7 @@
       _instructions_for_ai: AI_INSTRUCTIONS,
       _example_new_node: { id: 'new-1', parent: 12, kind: 'task', title: '...', summary: '', details: '', inputs: [{ name: '...', desc: '...' }], outputs: [], process: '', tech: '', status: 'todo', progress: 0, est_days: 1 },
       _example_work_report: { node: 12, status: 'done', progress: 100, summary: '...', how: '...', files_changed: ['src/x.php'], decisions: ['...'], how_to_test: '...', deviations: '', remaining: '', actual_days: 2 },
+      port_issues: portIssues(idx).map(function (i) { return { node: i.id, title: i.title, ports: i.ports.map(function (s) { return (s.side === 'in' ? 'input: ' : 'output: ') + s.name + ' (' + s.state + ')'; }) }; }),
       project: { id: p.id, name: p.name, description: p.description, start_date: p.start_date, target_date: p.target_date, status: p.status, ai_brief: p.ai_brief },
       build_order: bo,
       nodes: P.nodes.map(function (n) { return nodeOut(idx, n); }),
@@ -208,6 +239,6 @@
     return L.join('\n');
   }
 
-  W.ENG = { STATUS: STATUS, KIND: KIND, PRIO: PRIO, build: build, schedule: schedule, heuristic: heuristic, dur: dur,
+  W.ENG = { portStatus: portStatus, portIssues: portIssues, PORT_MSG: PORT_MSG, STATUS: STATUS, KIND: KIND, PRIO: PRIO, build: build, schedule: schedule, heuristic: heuristic, dur: dur,
     buildExport: buildExport, buildMarkdown: buildMarkdown, AI_INSTRUCTIONS: AI_INSTRUCTIONS };
 })(typeof window !== 'undefined' ? window : global);

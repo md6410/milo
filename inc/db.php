@@ -123,7 +123,9 @@ function pm_io($v): array
         if (!is_array($r)) continue;
         $name = pm_str($r['name'] ?? '', 200);
         if ($name === '') continue;
-        $out[] = ['name' => $name, 'desc' => pm_str($r['desc'] ?? ($r['description'] ?? ''), 1000)];
+        // desc = تعریفِ ورودی/خروجی در خودِ ماژول؛ use = کاربردش در همین جایی که ماژول به کار رفته؛ unused/why = «در اینجا استفاده نمی‌شود» + دلیل
+        $out[] = ['name' => $name, 'desc' => pm_str($r['desc'] ?? ($r['description'] ?? ''), 1000), 'use' => pm_str($r['use'] ?? '', 1000),
+                  'unused' => !empty($r['unused']), 'why' => pm_str($r['why'] ?? '', 1000)];
     }
     return $out;
 }
@@ -194,7 +196,9 @@ function pm_flow_clean($f): ?array
         $nodes[] = ['id' => $id, 'type' => $t, 'text' => pm_str($n['text'] ?? '', 600),
             'x' => max(-100000, min(100000, round((float)($n['x'] ?? 0), 1))), 'y' => max(-100000, min(100000, round((float)($n['y'] ?? 0), 1))),
             'w' => max(40, min(700, round((float)($n['w'] ?? 160)))), 'h' => max(30, min(500, round((float)($n['h'] ?? 64)))),
-            'color' => pm_color($n['color'] ?? null)];
+            'color' => pm_color($n['color'] ?? null),
+            'port' => (is_array($n['port'] ?? null) && in_array($n['port']['side'] ?? '', ['in', 'out'], true) && pm_str($n['port']['name'] ?? '', 200) !== '')
+                ? ['side' => $n['port']['side'], 'name' => pm_str($n['port']['name'], 200)] : null];
     }
     $edges = []; $eids = [];
     foreach (array_slice(is_array($f['edges'] ?? null) ? $f['edges'] : [], 0, 800) as $e) {
@@ -409,7 +413,7 @@ function pm_copy_subtree(PDO $db, int $srcId, int $dstPid, ?int $dstParent, arra
         $x = $isRoot && array_key_exists('x', $over) ? $over['x'] : $r['x'];
         $y = $isRoot && array_key_exists('y', $over) ? $over['y'] : $r['y'];
         $sort = $isRoot ? pm_next_sort($db, $dstPid, $newParent) : (int)$r['sort'];
-        $ins->execute([$dstPid, $newParent, $r['kind'], $title, $r['summary'], $r['details'], $r['inputs'], $r['outputs'], $r['process'], $r['tech'], $r['priority'],
+        $ins->execute([$dstPid, $newParent, $r['kind'], $title, $r['summary'], $r['details'], $isRoot ? pm_reset_ports($r['inputs']) : $r['inputs'], $isRoot ? pm_reset_ports($r['outputs']) : $r['outputs'], $r['process'], $r['tech'], $r['priority'],
             'todo', 0, $r['est_days'], $r['final_days'], null, null, '', $r['tags'], $sort, $x, $y, $r['color'], $r['icon'], $r['flow'], 0,
             $r['id'], $isRoot ? ($over['src_name'] ?? $r['title']) : ($r['src_name'] ?: null), $now, $now]);
         $nid = (int)$db->lastInsertId();
@@ -505,4 +509,14 @@ function pm_fix_hierarchy(PDO $db, int $pid, array &$warn): void
         }
     };
     $walk(0, null);
+}
+
+
+/** ورودی/خروجی‌های ریشهٔ رونوشت: «کاربردِ همین‌جا» و «بدون‌استفاده» از نو شروع می‌شود (تعریفِ ماژول می‌ماند). */
+function pm_reset_ports($json): string
+{
+    $a = json_decode((string)$json, true);
+    if (!is_array($a)) return '[]';
+    foreach ($a as &$p) { $p['use'] = ''; $p['unused'] = false; $p['why'] = ''; }
+    return json_encode($a, JSON_UNESCAPED_UNICODE);
 }
