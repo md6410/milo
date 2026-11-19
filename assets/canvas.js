@@ -192,7 +192,7 @@
       color = color || '#7d88a3';
       var id = MARKER + color.replace('#', '');
       if (!markers[id]) {
-        var m = sv('marker', { id: id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto' });
+        var m = sv('marker', { id: id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
         m.appendChild(sv('path', { d: 'M0 0L10 5L0 10z', fill: color })); defs.appendChild(m); markers[id] = 1;
       }
       return 'url(#' + id + ')';
@@ -272,11 +272,12 @@
       v.setAttribute('stroke', l.color || '#7d88a3'); v.setAttribute('stroke-width', l.w || 2);
       if (l.dashed) v.setAttribute('stroke-dasharray', '6 5'); else v.removeAttribute('stroke-dasharray');
       if (l.arrow !== false) v.setAttribute('marker-end', markerFor(l.color)); else v.removeAttribute('marker-end');
+      if (l.both) v.setAttribute('marker-start', markerFor(l.color)); else v.removeAttribute('marker-start');
       el.setAttribute('class', 'cvl' + (C.selLink === l.id ? ' sel' : '') + (l.locked ? ' locked' : ''));
       var lb = labelEl[l.id];
       if (l.label) {
         if (!lb) { lb = h('div', 'cv-lbl'); lb.setAttribute('data-lid', l.id); labelLayer.appendChild(lb); labelEl[l.id] = lb; }
-        lb.textContent = l.label; lb.style.left = geo.mid.x + 'px'; lb.style.top = geo.mid.y + 'px';
+        lb.textContent = l.label; lb.title = l.label; lb.style.left = geo.mid.x + 'px'; lb.style.top = geo.mid.y + 'px';
         lb.className = 'cv-lbl' + (C.selLink === l.id ? ' sel' : '');
         lb.style.borderColor = l.color || '';
       } else if (lb) { lb.remove(); delete labelEl[l.id]; }
@@ -347,7 +348,8 @@
         if (!l || !geo || l.locked) { tb.style.display = 'none'; return; }
         if (o.onLinkColor) tb.appendChild(colorDots(l.color, function (c) { o.onLinkColor(l, c); }));
         tb.appendChild(btn('✎', 'برچسب', function () { C.editLabel(l.id); }));
-        if (o.onLinkReverse) tb.appendChild(btn('⇄', 'برعکس‌کردنِ جهت', function () { o.onLinkReverse(l); }));
+        if (o.onLinkBoth) tb.appendChild(btn(l.both ? '→' : '⇄', l.both ? 'یک‌طرفه کن' : 'دوطرفه کن', function () { o.onLinkBoth(l); }));
+        if (o.onLinkReverse && !l.both) tb.appendChild(btn('↺', 'برعکس‌کردنِ جهت', function () { o.onLinkReverse(l); }));
         tb.appendChild(btn('🗑', 'حذفِ پیوند', function () { if (o.onLinkDelete) o.onLinkDelete(l); }));
         pos = toScreen(geo.mid.x, geo.mid.y);
       }

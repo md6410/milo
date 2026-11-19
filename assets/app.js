@@ -190,7 +190,7 @@ function statusHtml() {
   if (!S.P) return '<span class="sb-i">👤 ' + esc(S.user || '') + '</span><span class="grow"></span><span class="sb-i" id="clock">' + nowStr() + '</span>';
   var n = S.sel ? S.idx.byId.get(S.sel) : null, ch = S.P.changes[0], parts = [];
   parts.push('<span class="sb-mode ' + (S.editing ? 'edit' : 'view') + '">' + (S.editing ? '✎ در حال ویرایش' : '👁 فقط مشاهده') + '</span>');
-  if (n) parts.push('<span class="sb-i" title="' + esc(S.idx.pathText(n.id)) + '">' + (n.icon || KIND_ICON[n.kind]) + ' ' + esc(S.idx.pathText(n.id).slice(-60)) + '</span><span class="sb-i">⏱ این بخش: <b>' + fmtDur(nodeTime(n.id)) + '</b></span>');
+  if (n) parts.push('<span class="sb-i" title="' + esc(S.idx.pathText(n.id)) + '">' + (n.icon || KIND_ICON[n.kind]) + ' ' + esc(S.idx.pathText(n.id)) + '</span><span class="sb-i">⏱ این بخش: <b>' + fmtDur(nodeTime(n.id)) + '</b></span>');
   parts.push('<span class="sb-i">🕘 کلِ زمانِ طراحی: <b>' + fmtDur(totalTime()) + '</b></span>');
   if (ch) parts.push('<span class="sb-i grow" title="' + esc(ch.action + ' ' + ch.detail) + '">🔄 آخرین تغییر: ' + esc(ch.action) + (ch.path ? ' در «' + esc(ch.path.split(' › ').slice(-2).join(' › ')) + '»' : '') + ' <span class="mut">(' + relTime(ch.created_at) + ')</span></span>');
   else parts.push('<span class="grow"></span>');
@@ -284,7 +284,7 @@ function authView() {
 function homeView() {
   var cards = S.projects.map(function (p) {
     return '<div class="card pcard" data-act="open" data-id="' + p.id + '"><h3>🗂️ ' + esc(p.name) + '</h3>' +
-      '<div class="mut sm" style="min-height:22px">' + esc((p.description || '').slice(0, 90)) + '</div>' +
+      '<div class="mut sm clamp2" style="min-height:22px" title="' + esc(p.description || '') + '">' + esc(p.description || '') + '</div>' +
       '<div class="row" style="margin:8px 0 4px"><div class="grow">' + bar(p.progress, p.progress >= 100 ? 'ok' : '') + '</div><b>' + FA(p.progress) + '٪</b></div>' +
       '<div class="row sm mut"><span>' + FA(p.node_count) + ' بخش</span><span>·</span><span>' + FA(p.leaf_done) + '/' + FA(p.leaf_count) + ' کار</span><span>·</span><span>⏱ ' + fmtDur(p.work_total) + '</span>' +
       (p.target_date ? '<span>·</span><span>هدف: ' + J.fmt(p.target_date) + '</span>' : '') + '</div></div>';
@@ -340,7 +340,7 @@ function dashView() {
   var chgList = P.changes.slice(0, 6).map(chgRow).join('') || '<div class="mut">—</div>';
   var rec = P.logs.slice(0, 8).map(function (l) {
     var n = l.node_id ? idx.byId.get(l.node_id) : null;
-    return '<div data-act="' + (n ? 'pick' : 'noop') + '" data-id="' + (l.node_id || 0) + '"><span class="pill">' + (l.kind === 'ai_report' ? 'AI' : 'یادداشت') + '</span><span class="grow t sm">' + esc((l.body || '').slice(0, 70)) + '</span><span class="mut sm">' + esc(n ? n.title : '') + '</span></div>';
+    return '<div data-act="' + (n ? 'pick' : 'noop') + '" data-id="' + (l.node_id || 0) + '"><span class="pill">' + (l.kind === 'ai_report' ? 'AI' : 'یادداشت') + '</span><span class="grow t sm" title="' + esc(l.body || '') + '">' + esc((l.body || '').slice(0, 140)) + '</span><span class="mut sm">' + esc(n ? n.title : '') + '</span></div>';
   }).join('');
   if (!P.nodes.length) return '<div class="card empty">پروژه خالی است. اولین بخش را اضافه کنید، یا از «ایمپورت» فایلِ ساختار بیاورید.<br><br><button class="btn pri" data-act="addnode" data-parent="0">＋ افزودن اولین بخشِ کلی</button></div>';
   return '<div class="kpis">' +
@@ -380,10 +380,10 @@ function blockHtml(n, v, ghost) {
   if (n.src_name) meta.push('📚 ' + esc(n.src_name));
   var t = nodeTime(n.id); if (t >= 60) meta.push('⏱ ' + fmtDur(t));
   var sm = portStateMap(n), pcls = function (side, p) { var st = sm[side + ':' + p.name]; return st === 'unused' ? ' unused' : (st === 'none' || st === 'dangling' ? ' warn' : ''); };
-  var pi = (n.inputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-pi' + pcls('in', p) + '" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
-  var po = (n.outputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-po' + pcls('out', p) + '" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
+  var pi = (n.inputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-pi' + pcls('in', p) + '" style="top:' + (top + i * 22) + 'px" title="' + esc([p.name, p.desc, p.use].filter(Boolean).join(' — ')) + '">' + esc(p.name) + '</span>'; }).join('');
+  var po = (n.outputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-po' + pcls('out', p) + '" style="top:' + (top + i * 22) + 'px" title="' + esc([p.name, p.desc, p.use].filter(Boolean).join(' — ')) + '">' + esc(p.name) + '</span>'; }).join('');
   return '<div class="bk kk-' + n.kind + ' st-' + st + '"><div class="bk-h"><span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><span class="bk-k">' + E.KIND[n.kind] + (ghost ? ' · بیرونی' : '') + '</span>' +
-    '<span class="bk-s">' + (v.crit && S.crit ? '<b class="crit">بحرانی</b> ' : '') + E.STATUS[st] + '</span></div><div class="bk-t">' + esc(n.title) + '</div>' + pi + po +
+    '<span class="bk-s">' + (v.crit && S.crit ? '<b class="crit">بحرانی</b> ' : '') + E.STATUS[st] + '</span></div><div class="bk-t" title="' + esc(n.title + (n.summary ? ' — ' + n.summary : '')) + '">' + esc(n.title) + '</div>' + pi + po +
     '<div class="bk-m">' + (meta.join(' · ') || '&nbsp;') + '</div><div class="bk-p"><i style="width:' + pr + '%"></i></div></div>';
 }
 /* چیدمانِ لایه‌ای (پیش‌نیازها راست، پس‌نیازها چپ) برای بلوک‌هایی که هنوز جایگاهِ ثبت‌شده ندارند */
@@ -424,9 +424,12 @@ function mapModel(forceAuto) {
     else if (a.card && b.ghost) { A = String(a.card); B = 'g' + b.ghost; ghosts[b.ghost] = ghosts[b.ghost] || 'out'; }
     else return;
     var exact = ea === d.from_id && eb === d.to_id, k = exact ? A + '>' + B + '>' + d.id : A + '>' + B;
-    var e = edges[k] = edges[k] || { a: A, b: B, labels: [], real: null, src: ea };
-    if (exact) e.real = d; else if (d.label && e.labels.indexOf(d.label) < 0) e.labels.push(d.label);
+    var e = edges[k] = edges[k] || { a: A, b: B, labels: [], real: null, src: ea, both: false };
+    if (exact) e.real = d; else { if (d.label && e.labels.indexOf(d.label) < 0) e.labels.push(d.label); if (d.two) e.both = true; }
   });
+  /* رفت و برگشتِ لایه‌ای (A→B و B→A) یک پیوندِ دوطرفه می‌شود */
+  Object.keys(edges).forEach(function (k) { var e = edges[k]; if (e.real || e.dead) return; var rk = e.b + '>' + e.a, r = edges[rk]; if (r && !r.real && !r.dead) { e.both = true; r.dead = true; r.labels.forEach(function (l) { if (e.labels.indexOf(l) < 0) e.labels.push(l); }); } });
+  Object.keys(edges).forEach(function (k) { if (edges[k].dead) delete edges[k]; });
   var kidIds = kids.map(String), dims = {};
   kids.forEach(function (id) { dims[String(id)] = blockDims(idx.byId.get(id)); });
   var auto = autoLayout(kidIds, Object.keys(edges).map(function (k) { return edges[k]; }), dims);
@@ -446,9 +449,9 @@ function mapModel(forceAuto) {
     var e = edges[k], sn = idx.byId.get(e.src), col = sn ? nodeColor(sn) : null, d = e.real;
     if (d) {
       var lab = d.label || (d.out_name && d.in_name ? d.out_name + ' ← ' + d.in_name : (d.out_name || d.in_name || ''));
-      return { id: 'd' + d.id, from: e.a, to: e.b, fromPort: d.out_name || null, toPort: d.in_name || null, label: lab, color: col, dep: d };
+      return { id: 'd' + d.id, from: e.a, to: e.b, fromPort: d.out_name || null, toPort: d.in_name || null, label: lab, color: col, dep: d, both: !!d.two };
     }
-    return { id: 'a' + k, from: e.a, to: e.b, label: e.labels.join('، '), color: col, dashed: true, locked: true };
+    return { id: 'a' + k, from: e.a, to: e.b, label: e.labels.join('، '), color: col, dashed: true, locked: true, both: e.both };
   });
   return { items: items, links: links, kids: kids };
 }
@@ -515,9 +518,10 @@ function mountMap() {
       return Promise.all(ids.map(function (i) { return api('node_delete', { project_id: S.pid, id: rawId(i) }); })).then(function () { S.sel = 0; return reload(); });
     }),
     onOpen: function (it) { var id = rawId(it.id); S.sel = id; S.focus = it.ghost ? S.idx.parentOf(id) : id; renderContent(); renderDrawer(); updStatus(); },
-    onLinkLabel: guard(function (l, text) { if (!l.dep) return; return api('dep_save', { project_id: S.pid, from_id: l.dep.from_id, to_id: l.dep.to_id, label: text, out_name: l.dep.out_name || '', in_name: l.dep.in_name || '' }).then(reload); }),
+    onLinkLabel: guard(function (l, text) { if (!l.dep) return; return api('dep_save', { project_id: S.pid, from_id: l.dep.from_id, to_id: l.dep.to_id, label: text, out_name: l.dep.out_name || '', in_name: l.dep.in_name || '', two: !!l.dep.two }).then(reload); }),
     onLinkDelete: guard(function (l) { if (!l.dep) return; return api('dep_delete', { project_id: S.pid, id: l.dep.id }).then(reload); }),
-    onLinkReverse: guard(function (l) { var d = l.dep; if (!d) return; return api('dep_delete', { project_id: S.pid, id: d.id }).then(function () { return api('dep_save', { project_id: S.pid, from_id: d.to_id, to_id: d.from_id, label: d.label, out_name: d.in_name || '', in_name: d.out_name || '' }); }).then(reload); }),
+    onLinkBoth: guard(function (l) { var d = l.dep; if (!d) return; return api('dep_save', { project_id: S.pid, from_id: d.from_id, to_id: d.to_id, label: d.label, out_name: d.out_name || '', in_name: d.in_name || '', two: !d.two }).then(reload); }),
+    onLinkReverse: guard(function (l) { var d = l.dep; if (!d) return; return api('dep_delete', { project_id: S.pid, id: d.id }).then(function () { return api('dep_save', { project_id: S.pid, from_id: d.to_id, to_id: d.from_id, label: d.label, out_name: d.in_name || '', in_name: d.out_name || '', two: !!d.two }); }).then(reload); }),
     readActions: function (it) { var id = rawId(it.id), n = it.node, a = [{ icon: '📝', title: 'جزئیات', fn: function () { S.sel = id; S.drawerOpen = true; renderDrawer(); } }];
       a.push({ icon: n.kind === 'task' ? '📄' : '⤵', title: n.kind === 'task' ? 'باز کردنِ صفحهٔ کار' : 'باز کردنِ زیرمجموعه', fn: function () { S.sel = id; S.focus = id; renderContent(); renderDrawer(); } });
       if (n.kind === 'module') a.push({ icon: '📤', title: 'ذخیره در کتابخانه (رونوشت)', fn: function () { saveToLib(id); } }); return a; },
@@ -556,6 +560,7 @@ function portDialog2(id, side, name) {
   modal({ title: (side === 'in' ? '⇢ ' : '⇠ ') + lbl + ' «' + name + '» — ' + n.title, noFocus: true, noOk: !ed, ok: '💾 ثبت',
     body: '<div class="ps ' + st.state + '" style="margin-bottom:10px"><span class="ps-t">' + E.PORT_MSG[st.state] + '</span></div>' +
       (n.src_name ? '<p class="sm mut">این بخش رونوشتی از ماژولِ کتابخانهٔ «' + esc(n.src_name) + '» است؛ «تعریف» از خودِ ماژول آمده و «کاربردِ اینجا» فقط برای همین استفاده است.</p>' : '') +
+      '<label class="f"><span>نامِ ' + lbl + (ed ? ' (با تغییرِ نام، پیوندها و فلوچارت هم هماهنگ می‌شوند)' : '') + '</span><input name="pname" value="' + esc(p.name) + '"' + dis + '></label>' +
       '<label class="f"><span>تعریف در خودِ ماژول (' + lbl + ' چیست / چه قالبی دارد)</span><textarea name="desc"' + dis + '>' + esc(p.desc || '') + '</textarea></label>' +
       '<label class="f"><span>کاربردِ آن در همین جا (اختصاصیِ این استفاده از ماژول)</span><textarea name="use"' + dis + ' placeholder="' + (side === 'in' ? 'مثلاً: اینجا ایمیلِ مشتری به آن داده می‌شود' : 'مثلاً: خروجی به ماژولِ سفارش می‌رود') + '">' + esc(p.use || '') + '</textarea></label>' +
       '<label class="row" style="margin-bottom:6px"><input type="checkbox" name="unused"' + (p.unused ? ' checked' : '') + dis + '> ✗ این ' + lbl + ' در اینجا استفاده نمی‌شود</label>' +
@@ -566,9 +571,11 @@ function portDialog2(id, side, name) {
     onok: function (f) {
       var un = $('[name=unused]', f).checked, why = $('[name=why]', f).value.trim();
       if (un && !why) { toast('برای «بدون استفاده» دلیل بنویسید', true); return false; }
-      var nl = list.map(function (x) { return x.name === name ? { name: x.name, desc: $('[name=desc]', f).value, use: $('[name=use]', f).value, unused: un, why: un ? why : '' } : x; });
+      var nn = $('[name=pname]', f).value.trim(); if (!nn) { toast('نام نمی‌تواند خالی باشد', true); return false; }
+      var nl = list.map(function (x) { return x.name === name ? { name: nn, desc: $('[name=desc]', f).value, use: $('[name=use]', f).value, unused: un, why: un ? why : '' } : x; });
       var body = { project_id: S.pid, id: id }; body[field] = nl;
-      return api('node_save', body).then(reload);
+      var ren = nn !== name ? api('port_rename', { project_id: S.pid, node_id: id, side: side, old: name, 'new': nn }) : Promise.resolve();
+      return ren.then(function () { return api('node_save', body); }).then(reload);
     } });
 }
 
@@ -897,10 +904,10 @@ function parentSelect(node) {
   validParents(node).forEach(function (id) { var n = S.idx.byId.get(id); o += '<option value="' + id + '"' + (id === cur ? ' selected' : '') + '>' + esc(new Array(S.idx.depth(id) + 1).join('— ') + (n.icon || KIND_ICON[n.kind]) + ' ' + n.title) + '</option>'; });
   return o;
 }
-function ioRows(kind, list, single) { return (list || []).slice(0, single ? 1 : 99).map(function (r) { return ioRow(kind, r); }).join(''); }
-function ioRow(kind, r) {
+function ioRows(kind, list, single) { return (list || []).slice(0, single ? 1 : 99).map(function (r) { return ioRow(kind, r, true); }).join(''); }
+function ioRow(kind, r, ex) {
   r = r || {};
-  return '<div class="io2"><div class="io"><input data-io="' + kind + '-name" placeholder="نام" value="' + esc(r.name || '') + '"><input data-io="' + kind + '-desc" placeholder="تعریف در خودِ ماژول / قالبِ داده" value="' + esc(r.desc || '') + '"><button type="button" class="btn sm ghost danger" data-act="rmrow">×</button></div>' +
+  return '<div class="io2"><div class="io"><input data-io="' + kind + '-name" placeholder="نام" value="' + esc(r.name || '') + '"' + (ex ? ' readonly title="برای تغییرِ نام دکمهٔ ✎ را بزنید (پیوندها و فلوچارت هم هماهنگ می‌شوند)"' : '') + '>' + (ex && S.sel ? '<button type="button" class="btn sm ghost" title="تغییرِ نام و جزئیات" data-act="portdlg" data-id="' + S.sel + '" data-side="' + (kind === 'in' ? 'in' : 'out') + '" data-name="' + esc(r.name || '') + '">✎</button>' : '') + '<input data-io="' + kind + '-desc" placeholder="تعریف در خودِ ماژول / قالبِ داده" value="' + esc(r.desc || '') + '"><button type="button" class="btn sm ghost danger" data-act="rmrow">×</button></div>' +
     '<div class="io io-use"><input data-io="' + kind + '-use" placeholder="کاربردِ آن در همین جایی که به کار رفته (اختصاصیِ این‌جا)" value="' + esc(r.use || '') + '"></div>' +
     '<div class="io io-un"><label class="unl"><input type="checkbox" data-io="' + kind + '-unused"' + (r.unused ? ' checked' : '') + '> ✗ در اینجا استفاده نمی‌شود</label><input data-io="' + kind + '-why" placeholder="چرا؟ (دلیل لازم است)" value="' + esc(r.why || '') + '"></div></div>';
 }
@@ -922,7 +929,7 @@ function depBlock(id, dir) { // dir: 'in' پیش‌نیازها  |  'out' پس�
   return '<div class="sub"><h4>' + (dir === 'in' ? '⇢ ورودی‌ها از… (این بخش از این‌ها می‌گیرد)' : '⇠ خروجی‌ها به… (این‌ها از این بخش می‌گیرند)') + '</h4>' +
     (list.map(function (d) {
       var oid = dir === 'in' ? d.from_id : d.to_id, ports = (d.out_name || d.in_name) ? '<span class="pill">' + esc(d.out_name || '؟') + ' ← ' + esc(d.in_name || '؟') + '</span>' : '';
-      return '<div class="dep"><a class="grow sm" style="cursor:pointer" data-act="pick" data-id="' + oid + '">' + (idx.byId.get(oid).icon || KIND_ICON[idx.byId.get(oid).kind]) + ' ' + esc(idx.byId.get(oid).title) + '</a>' + ports + '<input class="grow" data-dlabel="' + d.id + '" data-from="' + d.from_id + '" data-to="' + d.to_id + '" data-on="' + esc(d.out_name || '') + '" data-in="' + esc(d.in_name || '') + '" value="' + esc(d.label || '') + '" placeholder="برچسب"' + (ed ? '' : ' disabled') + '>' + (ed ? '<button class="btn sm ghost danger" data-act="deldep" data-id="' + d.id + '">×</button>' : '') + '</div>';
+      return '<div class="dep"><a class="grow sm" style="cursor:pointer" data-act="pick" data-id="' + oid + '">' + (idx.byId.get(oid).icon || KIND_ICON[idx.byId.get(oid).kind]) + ' ' + esc(idx.byId.get(oid).title) + '</a>' + ports + (d.two ? '<span class="pill" title="پیوندِ دوطرفه">⇄</span>' : '') + '<input class="grow" data-dlabel="' + d.id + '" data-two="' + (d.two ? 1 : 0) + '" data-from="' + d.from_id + '" data-to="' + d.to_id + '" data-on="' + esc(d.out_name || '') + '" data-in="' + esc(d.in_name || '') + '" value="' + esc(d.label || '') + '" placeholder="برچسب"' + (ed ? '' : ' disabled') + '>' + (ed ? '<button class="btn sm ghost" title="' + (d.two ? 'یک‌طرفه کن' : 'دوطرفه کن') + '" data-act="deptwo" data-id="' + d.id + '">' + (d.two ? '→' : '⇄') + '</button><button class="btn sm ghost danger" data-act="deldep" data-id="' + d.id + '">×</button>' : '') + '</div>';
     }).join('') || '<div class="mut sm">—</div>') +
     (ed && opts ? '<form data-form="adddep" data-dir="' + dir + '" data-id="' + id + '" class="dep" style="margin-top:6px"><select name="other" class="grow" style="width:auto"><option value="">افزودن…</option>' + opts + '</select><input name="label" class="grow" placeholder="برچسب (اختیاری)"><button class="btn sm" type="submit">＋</button></form>' : '') + '</div>';
 }
@@ -1255,6 +1262,7 @@ function updTick() {
 function elId(el) { return +el.getAttribute('data-id'); }
 var ACTS = {
   noop: function () {},
+  deptwo: function (el) { var d = S.P.deps.filter(function (x) { return x.id === elId(el); })[0]; if (!d) return; return api('dep_save', { project_id: S.pid, from_id: d.from_id, to_id: d.to_id, label: d.label, out_name: d.out_name || '', in_name: d.in_name || '', two: !d.two }).then(reload); },
   portdlg: function (el) { portDialog2(elId(el), el.getAttribute('data-side'), el.getAttribute('data-name')); },
   menu: function (el, ev) {
     var mm = el.closest('.mm'), was = mm.classList.contains('open');
@@ -1355,7 +1363,7 @@ var ACTS = {
   },
   clearsched: function () { if (!confirm('همهٔ تاریخ‌های شروعِ ثبت‌شده پاک شود (برنامه دوباره خودکار از وابستگی‌ها محاسبه می‌شود)؟')) return; var items = S.sch.order.filter(function (id) { return S.idx.byId.get(id).start_date; }).map(function (id) { return { id: id, start_date: null }; }); if (!items.length) return; return api('nodes_bulk', { project_id: S.pid, items: items }).then(reload); }
 };
-var MUT = { addnode: 1, mv: 1, delnode: 1, deldep: 1, addio: 1, rmrow: 1, addms: 1, editms: 1, dellog: 1, delfile: 1, savebrief: 1, fillest: 1, applysched: 1, clearsched: 1, flowdel: 1, maplayout: 1, editproject: 1 };
+var MUT = { addnode: 1, mv: 1, delnode: 1, deldep: 1, deptwo: 1, addio: 1, rmrow: 1, addms: 1, editms: 1, dellog: 1, delfile: 1, savebrief: 1, fillest: 1, applysched: 1, clearsched: 1, flowdel: 1, maplayout: 1, editproject: 1 };
 document.addEventListener('click', function (e) {
   if (!(e.target.closest && e.target.closest('.mm'))) $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });
   var dot = e.target.closest ? e.target.closest('#colpick .cv-dot') : null;
@@ -1403,7 +1411,7 @@ document.addEventListener('change', function (e) {
     Array.prototype.forEach.call(t.files, function (x) { fd.append('files[]', x, x.name); });
     guard(function () { return api('upload', fd).then(function () { toast('بارگذاری شد'); return reload(); }); })();
   } else if (t.getAttribute && t.getAttribute('data-dlabel')) {
-    guard(function () { return api('dep_save', { project_id: S.pid, from_id: +t.getAttribute('data-from'), to_id: +t.getAttribute('data-to'), label: t.value, out_name: t.getAttribute('data-on') || '', in_name: t.getAttribute('data-in') || '' }).then(function () { toast('ذخیره شد'); return loadProject(S.pid); }); })();
+    guard(function () { return api('dep_save', { project_id: S.pid, from_id: +t.getAttribute('data-from'), to_id: +t.getAttribute('data-to'), label: t.value, out_name: t.getAttribute('data-on') || '', in_name: t.getAttribute('data-in') || '', two: t.getAttribute('data-two') === '1' }).then(function () { toast('ذخیره شد'); return loadProject(S.pid); }); })();
   } else if (t.getAttribute && t.getAttribute('data-f') && t.closest('tr')) {
     var row = t.closest('tr'), id = +row.getAttribute('data-id'), k = t.getAttribute('data-f'), val;
     if (k === 'start_date') { val = J.parse(t.value); if (val === undefined) { t.classList.add('bad'); return toast('تاریخ را مثل ۱۴۰۵/۰۸/۲۸ بنویسید', true); } t.classList.remove('bad'); }
@@ -1427,6 +1435,15 @@ document.addEventListener('keydown', function (e) {
   if (!S.P || !S.user) return;
   if (meta && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); if (S.editing) toast('از قبل در حالتِ ویرایش هستید'); else startEdit(); }
   else if (meta && (e.key === 's' || e.key === 'S') && S.editing && !document.querySelector('.fl-ov')) { e.preventDefault(); saveEdit(); }
+});
+document.addEventListener('mouseover', function (e) {
+  /* هر متنِ بریده‌شده (… یا خطِ کم‌شده) با رفتن رویش کامل نشان داده شود */
+  for (var el = e.target, i = 0; el && el.nodeType === 1 && i < 4; el = el.parentElement, i++) {
+    if (el.title) return;
+    var cs = window.getComputedStyle(el), txt = (el.textContent || '').trim();
+    if (!txt || txt.length < 8) continue;
+    if ((cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth + 1) || (cs.overflow === 'hidden' && el.scrollHeight > el.clientHeight + 2 && el.children.length < 4)) { el.title = txt; return; }
+  }
 });
 window.addEventListener('hashchange', route);
 loadMe().then(function () { route(); setTimeout(updTick, 3000); setInterval(updTick, 10 * 60 * 1000); }).catch(function (e) { $('#app').innerHTML = '<div class="boot">خطا در اتصال به سرور: ' + esc(e.message) + '</div>'; });

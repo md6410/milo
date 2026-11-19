@@ -65,7 +65,7 @@
     var preds = new Map(), succs = new Map();
     leaves.forEach(function (l) { preds.set(l, new Set()); succs.set(l, new Set()); });
     P.deps.forEach(function (d) {
-      if (!idx.byId.has(d.from_id) || !idx.byId.has(d.to_id)) return;
+      if (!idx.byId.has(d.from_id) || !idx.byId.has(d.to_id) || d.two) return; /* پیوندِ دوطرفه ترتیب نمی‌سازد */
       idx.leavesOf(d.to_id).forEach(function (t) {
         idx.leavesOf(d.from_id).forEach(function (f) { if (f !== t) { preds.get(t).add(f); succs.get(f).add(t); } });
       });
@@ -174,6 +174,7 @@
     'RULE 2 - WORK REPORT: after you finish (or partly finish) work, add an entry to the top-level "work_report" array for EVERY node you worked on, and deliver the file. Entry format: {"node": <id>, "status": "todo|doing|review|done|blocked|hold", "progress": 0-100, "summary": "...", "how": "how it was implemented", "files_changed": ["path"], "decisions": ["..."], "how_to_test": "...", "deviations": "...", "remaining": "...", "actual_days": optional number}. Be honest: mark done only what really works. The user imports the file and the timeline, progress and per-node history update automatically.',
     'DELIVERY: always hand the result back as a downloadable UTF-8 JSON file named "<project>-updated.pm.json" (valid JSON, no comments) plus a short summary in chat. Write all human-readable text in the language of the existing content (Persian unless the file says otherwise).',
     'PORT PURPOSE RULE: every input and output of a node must have a purpose. Either define it in the node\'s "flow": a flow node (type io) with "port":{"side":"in"|"out","name":"<exact port name>"}; an input must have an outgoing edge (what is done with it) and an output must have an incoming edge (where it comes from). Or mark the port unused: {"unused":true,"why":"reason"}. Ports have "desc" (definition inside the module) and "use" (what it means in THIS place where the module is used) - fill "use" for module instances. "port_issues" lists the ports that currently have no purpose; fix them.',
+    'TWO-WAY LINKS: a dependency with "two":true is bidirectional (data flows both ways); it does not impose a build order.',
     'VISUAL FIELDS: x, y, color (#rrggbb) and icon on a node are canvas layout hints - keep them unchanged (new nodes may omit them). "flow" is an optional flowchart that explains the node\'s process graphically: {"nodes":[{"id","type","text","x","y","w","h"}],"edges":[{"id","from","to","label"}]} with type one of start,end,process,decision,io,sub,db,note,text (edge labels on a decision are usually yes/no). Follow it when implementing; if you change the process, update the flow too, and you may add a flow to a node that has none.',
     'Never invent ids for existing nodes, never drop the "id" of an existing item, and never put secrets or passwords in the file.'
   ];
@@ -202,7 +203,7 @@
       project: { id: p.id, name: p.name, description: p.description, start_date: p.start_date, target_date: p.target_date, status: p.status, ai_brief: p.ai_brief },
       build_order: bo,
       nodes: P.nodes.map(function (n) { return nodeOut(idx, n); }),
-      dependencies: P.deps.map(function (d) { return { from: d.from_id, to: d.to_id, label: d.label, out: d.out_name || null, 'in': d.in_name || null }; }),
+      dependencies: P.deps.map(function (d) { return { from: d.from_id, to: d.to_id, label: d.label, out: d.out_name || null, 'in': d.in_name || null, two: !!d.two }; }),
       milestones: P.milestones.map(function (m) { return { id: m.id, title: m.title, date: m.date, done: !!m.done, note: m.note }; }),
       logs: P.logs.slice().reverse().map(function (l) { return { id: l.id, node: l.node_id, kind: l.kind, body: l.body, author: l.author, date: l.created_at }; }),
       files: P.files.map(function (f) { return { id: f.id, node: f.node_id, name: f.name, size: f.size }; }),

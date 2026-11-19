@@ -142,12 +142,12 @@ function pm_import(PDO $db, array $doc, string $mode, ?int $pid, string $author)
                 if (array_key_exists('label', $d)) $db->prepare('UPDATE deps SET label=? WHERE id=?')->execute([pm_str($d['label'], 300), $eid]);
                 continue;
             }
-            if (pm_is_related($db, $pid, $f, $t) || pm_dep_path($db, $pid, $t, $f)) {
+            if (pm_is_related($db, $pid, $f, $t) || (empty($d['two']) && pm_dep_path($db, $pid, $t, $f))) {
                 $stat['warnings'][] = "وابستگیِ «$fk → $tk» دور یا رابطهٔ والد/فرزند می‌ساخت؛ رد شد";
                 continue;
             }
-            $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?)')
-               ->execute([$pid, $f, $t, pm_str($d['label'] ?? '', 300), $outN, $inN]);
+            $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two) VALUES(?,?,?,?,?,?,?)')
+               ->execute([$pid, $f, $t, pm_str($d['label'] ?? '', 300), $outN, $inN, !empty($d['two']) ? 1 : 0]);
             $stat['deps']++;
         }
 

@@ -30,7 +30,7 @@ function pm_db(): PDO
 function pm_schema(PDO $db): void
 {
     $v = (int)$db->query('PRAGMA user_version')->fetchColumn();
-    if ($v >= 3) return;
+    if ($v >= 4) return;
     if ($v < 1) $db->exec("
     CREATE TABLE IF NOT EXISTS users(
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
@@ -90,6 +90,11 @@ function pm_schema(PDO $db): void
         UPDATE projects SET kind='project' WHERE kind IS NULL;
         UPDATE nodes SET kind='area' WHERE parent_id IS NULL;
         PRAGMA user_version=3;");
+    }
+    if ($v < 4) {
+        // v4: پیوندِ دوطرفه
+        try { $db->exec('ALTER TABLE deps ADD COLUMN two INTEGER DEFAULT 0'); } catch (Throwable $e) { /* هست */ }
+        $db->exec('PRAGMA user_version=4');
     }
 }
 
@@ -250,7 +255,7 @@ function pm_is_related(PDO $db, int $pid, int $a, int $b): bool
 /** آیا از $a به $b مسیری از وابستگی‌ها هست؟ (برای جلوگیری از دور) */
 function pm_dep_path(PDO $db, int $pid, int $a, int $b): bool
 {
-    $st = $db->prepare('SELECT from_id, to_id FROM deps WHERE project_id=?');
+    $st = $db->prepare('SELECT from_id, to_id FROM deps WHERE project_id=? AND COALESCE(two,0)=0');
     $st->execute([$pid]);
     $adj = [];
     foreach ($st as $r) $adj[(int)$r['from_id']][] = (int)$r['to_id'];
@@ -423,8 +428,8 @@ function pm_copy_subtree(PDO $db, int $srcId, int $dstPid, ?int $dstParent, arra
     $walk($root, $dstParent, true);
     // وابستگی‌های درونیِ زیردرخت
     $ds = $db->query("SELECT * FROM deps WHERE from_id IN ($in) AND to_id IN ($in)")->fetchAll();
-    $di = $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?)');
-    foreach ($ds as $d) $di->execute([$dstPid, $map[(int)$d['from_id']], $map[(int)$d['to_id']], $d['label'], $d['out_name'], $d['in_name']]);
+    $di = $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two) VALUES(?,?,?,?,?,?,?)');
+    foreach ($ds as $d) $di->execute([$dstPid, $map[(int)$d['from_id']], $map[(int)$d['to_id']], $d['label'], $d['out_name'], $d['in_name'], (int)($d['two'] ?? 0)]);
     return ['id' => $map[$srcId], 'count' => count($map)];
 }
 
@@ -463,8 +468,8 @@ function pm_restore(PDO $db, int $pid, array $snap): void
             foreach ($cols as $c) $row[] = $c === 'project_id' ? $pid : ($n[$c] ?? null);
             $up->execute($row);
         }
-        $di = $db->prepare('INSERT INTO deps(id,project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?,?)');
-        foreach ($snap['deps'] ?? [] as $d) $di->execute([$d['id'] ?? null, $pid, $d['from_id'], $d['to_id'], $d['label'] ?? '', $d['out_name'] ?? null, $d['in_name'] ?? null]);
+        $di = $db->prepare('INSERT INTO deps(id,project_id,from_id,to_id,label,out_name,in_name,two) VALUES(?,?,?,?,?,?,?,?)');
+        foreach ($snap['deps'] ?? [] as $d) $di->execute([$d['id'] ?? null, $pid, $d['from_id'], $d['to_id'], $d['label'] ?? '', $d['out_name'] ?? null, $d['in_name'] ?? null, (int)($d['two'] ?? 0)]);
         $mi = $db->prepare('INSERT INTO milestones(id,project_id,title,date,done,note) VALUES(?,?,?,?,?,?)');
         foreach ($snap['milestones'] ?? [] as $m) $mi->execute([$m['id'] ?? null, $pid, $m['title'], $m['date'] ?? null, $m['done'] ?? 0, $m['note'] ?? '']);
         $db->commit();
@@ -519,4 +524,31 @@ function pm_reset_ports($json): string
     if (!is_array($a)) return '[]';
     foreach ($a as &$p) { $p['use'] = ''; $p['unused'] = false; $p['why'] = ''; }
     return json_encode($a, JSON_UNESCAPED_UNICODE);
+}
+
+
+/** تغییرِ نامِ یک ورودی/خروجی در همه‌جا: خودِ بخش، پیوندها و شکل‌های فلوچارت. */
+function pm_port_rename(PDO $db, int $pid, int $nodeId, string $side, string $old, string $new): void
+{
+    $col = $side === 'in' ? 'inputs' : 'outputs';
+    $st = $db->prepare("SELECT $col, flow FROM nodes WHERE id=? AND project_id=?");
+    $st->execute([$nodeId, $pid]);
+    $r = $st->fetch();
+    if (!$r) throw new RuntimeException('بخش پیدا نشد');
+    $list = json_decode((string)$r[$col], true) ?: [];
+    $hit = false;
+    foreach ($list as $p) { if ($p['name'] === $new && $new !== $old) throw new RuntimeException('ورودی/خروجی‌ای با این نام هست'); }
+    foreach ($list as &$p) if ($p['name'] === $old) { $p['name'] = $new; $hit = true; }
+    unset($p);
+    if (!$hit) throw new RuntimeException('ورودی/خروجی پیدا نشد');
+    $flow = json_decode((string)($r['flow'] ?? ''), true);
+    if (is_array($flow) && isset($flow['nodes'])) {
+        foreach ($flow['nodes'] as &$n) if (isset($n['port']) && $n['port']['side'] === $side && $n['port']['name'] === $old) { $n['port']['name'] = $new; if (($n['text'] ?? '') === $old) $n['text'] = $new; }
+        unset($n);
+    }
+    $db->beginTransaction();
+    $db->prepare("UPDATE nodes SET $col=?, flow=?, updated_at=? WHERE id=?")->execute([json_encode($list, JSON_UNESCAPED_UNICODE), is_array($flow) ? json_encode($flow, JSON_UNESCAPED_UNICODE) : $r['flow'], pm_now(), $nodeId]);
+    if ($side === 'out') $db->prepare('UPDATE deps SET out_name=? WHERE project_id=? AND from_id=? AND out_name=?')->execute([$new, $pid, $nodeId, $old]);
+    else $db->prepare('UPDATE deps SET in_name=? WHERE project_id=? AND to_id=? AND in_name=?')->execute([$new, $pid, $nodeId, $old]);
+    $db->commit();
 }

@@ -223,6 +223,17 @@ try {
             $touch();
             out(['ok' => true]);
 
+        case 'port_rename':
+            $needProject();
+            $nid = (int)($in['node_id'] ?? 0); $ownNode($nid);
+            $side = ($in['side'] ?? '') === 'out' ? 'out' : 'in';
+            $new = pm_str($in['new'] ?? '', 200); $old = pm_str($in['old'] ?? '', 200);
+            if ($new === '') fail('نام نمی‌تواند خالی باشد');
+            try { if ($new !== $old) pm_port_rename($db, $pid, $nid, $side, $old, $new); } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); fail($e->getMessage()); }
+            if ($new !== $old) pm_chg($db, $pid, $nid, 'تغییر نامِ ' . ($side === 'in' ? 'ورودی' : 'خروجی'), $old . ' ← ' . $new, $author);
+            $touch();
+            out(['ok' => true]);
+
         // ---- زمانِ کار
         case 'time_add':
             $needProject();
@@ -366,15 +377,20 @@ try {
             if (pm_is_related($db, $pid, $f, $t)) fail('بین یک بخش و زیرمجموعه‌اش وابستگی معنا ندارد');
             $outN = pm_str($in['out_name'] ?? '', 200) ?: null;
             $inN = pm_str($in['in_name'] ?? '', 200) ?: null;
+            $two = !empty($in['two']) ? 1 : 0;
             $st = $db->prepare('SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=? AND COALESCE(out_name,\'\')=? AND COALESCE(in_name,\'\')=?');
             $st->execute([$pid, $f, $t, $outN ?? '', $inN ?? '']);
             $eid = $st->fetchColumn();
             $label = pm_str($in['label'] ?? '', 300);
             if ($eid) {
-                $db->prepare('UPDATE deps SET label=? WHERE id=?')->execute([$label, $eid]);
+                if (array_key_exists('two', $in)) {
+                    if ($two && !$db->query('SELECT COALESCE(two,0) FROM deps WHERE id=' . (int)$eid)->fetchColumn()) { /* یک‌طرفه→دوطرفه: چرخه ندارد، ترتیب‌دهی نادیده می‌گیرد */ }
+                    elseif (!$two && pm_dep_path($db, $pid, $t, $f)) fail('با برگشتن به یک‌طرفه، چرخه ساخته می‌شود');
+                    $db->prepare('UPDATE deps SET label=?, two=? WHERE id=?')->execute([$label, $two, $eid]);
+                } else $db->prepare('UPDATE deps SET label=? WHERE id=?')->execute([$label, $eid]);
             } else {
-                if (pm_dep_path($db, $pid, $t, $f)) fail('این وابستگی دور می‌سازد (به‌هم‌وابستگیِ چرخه‌ای)');
-                $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?)')->execute([$pid, $f, $t, $label, $outN, $inN]);
+                if (!$two && pm_dep_path($db, $pid, $t, $f)) fail('این وابستگی دور می‌سازد (به‌هم‌وابستگیِ چرخه‌ای)');
+                $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two) VALUES(?,?,?,?,?,?,?)')->execute([$pid, $f, $t, $label, $outN, $inN, $two]);
                 pm_chg($db, $pid, $t, 'ساخت پیوند', $fn['title'] . ($outN ? ' (' . $outN . ')' : '') . ' ← ' . $tn['title'] . ($inN ? ' (' . $inN . ')' : ''), $author);
             }
             $touch();
