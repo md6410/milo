@@ -63,7 +63,31 @@
   function inside(x, y, R) { return x > R.l && x < R.r && y > R.t && y < R.b; }
   var DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
-  function routeOrtho(a, b, obs, used) {
+  /* آیا قطعهٔ (x1,y1)-(x2,y2) روی خطِ دیگری (هم‌راستا و هم‌پوشان) می‌افتد؟ خط‌های هم‌شبکه (از یک پورت) مستثنا */
+  function sameNet(u, nets) { if (!nets || !u.nets) return false; for (var i = 0; i < nets.length; i++) if (nets[i] && u.nets.indexOf(nets[i]) >= 0) return true; return false; }
+  function collide(x1, y1, x2, y2, used, nets) {
+    for (var q = 0; q < used.length; q++) {
+      var u = used[q]; if (sameNet(u, nets)) continue;
+      if (y1 === y2 && u.h && Math.abs(u.c - y1) < 8 && Math.min(Math.max(x1, x2), u.hi) - Math.max(Math.min(x1, x2), u.lo) > 1) return true;
+      if (x1 === x2 && !u.h && Math.abs(u.c - x1) < 8 && Math.min(Math.max(y1, y2), u.hi) - Math.max(Math.min(y1, y2), u.lo) > 1) return true;
+    }
+    return false;
+  }
+  /* چند پیکان روی یک لبهٔ یک شکل (بی‌پورت): در طولِ لبه پخش می‌شوند، به ترتیبِ سمتِ دیگرشان (بی‌تقاطع) */
+  function spreadAnchors(ends) {
+    var g = {};
+    ends.forEach(function (E) { if (!E || !E.p || E.fixed || !E.it || E.it.shape === 'diamond') return; var k = E.it.id + ':' + E.p.nx + ':' + E.p.ny; (g[k] = g[k] || []).push(E); });
+    Object.keys(g).forEach(function (k) {
+      var L = g[k]; if (L.length < 2) return;
+      var vert = L[0].p.nx !== 0, it = L[0].it;
+      L.sort(function (a, b) { return vert ? a.o.y - b.o.y : a.o.x - b.o.x; });
+      L.forEach(function (E, i) { var t = (i + 1) / (L.length + 1); if (vert) E.p.y = Math.round(it.y + it.h * t); else E.p.x = Math.round(it.x + it.w * t); });
+    });
+  }
+  function reserveStubs(a, b, used, nets) {
+    [a, b].forEach(function (p) { if (p && (p.nx || p.ny)) recordUsed([{ x: p.x, y: p.y }, { x: p.x + p.nx * 20, y: p.y + p.ny * 20 }], used, nets); });
+  }
+  function routeOrtho(a, b, obs, used, nets, hard) {
     var S = 20, A = { x: a.x + a.nx * S, y: a.y + a.ny * S }, B = { x: b.x + b.nx * S, y: b.y + b.ny * S };
     var xs = [A.x, B.x], ys = [A.y, B.y], i, j;
     obs.forEach(function (o) { xs.push(o.l, o.r); ys.push(o.t, o.b); });
@@ -75,13 +99,13 @@
       for (var q = 0; q < v.length; q++) {
         o.push(v[q]);
         var g = q + 1 < v.length ? v[q + 1] - v[q] : 0;
-        if (g >= 44) { var n = Math.min(5, Math.floor(g / 22)); for (var z = 1; z < n; z++) o.push(Math.round(v[q] + g * z / n)); }
+        if (g >= 36) { var n = Math.min(12, Math.floor(g / 18)); for (var z = 1; z < n; z++) o.push(Math.round(v[q] + g * z / n)); }
       }
       return o;
     }
     xs = lanes(xs); ys = lanes(ys);
     var nx = xs.length, ny = ys.length;
-    if (nx * ny > 30000) return null;
+    if (nx * ny > 40000) return null;
     var ix = {}, iy = {}; xs.forEach(function (v, k) { ix[v] = k; }); ys.forEach(function (v, k) { iy[v] = k; });
     var sI = ix[A.x], sJ = iy[A.y], tI = ix[B.x], tJ = iy[B.y];
     var freeMemo = {};
@@ -95,7 +119,7 @@
     function overlapPenalty(x1, y1, x2, y2) {
       var p = 0;
       for (var q = 0; q < used.length; q++) {
-        var u = used[q];
+        var u = used[q]; if (sameNet(u, nets)) continue;
         if (y1 === y2 && u.h && Math.abs(u.c - y1) < 6 && Math.max(x1, x2) > u.lo && Math.min(x1, x2) < u.hi) p += 400;
         else if (x1 === x2 && !u.h && Math.abs(u.c - x1) < 6 && Math.max(y1, y2) > u.lo && Math.min(y1, y2) < u.hi) p += 400;
       }
@@ -117,6 +141,7 @@
         if (cur.d !== 4 && ((cur.d ^ 1) === d)) continue; /* برگشت به عقب ممنوع */
         var x1 = xs[cur.i], y1 = ys[cur.j], x2 = xs[ni], y2 = ys[nj];
         if (!clear(x1, y1, x2, y2)) continue;
+        if (hard && collide(x1, y1, x2, y2, used, nets)) continue; /* هیچ خطی روی خطِ دیگر نمی‌رود؛ فقط عبورِ عمود */
         var turn = cur.d !== 4 && cur.d !== d ? 40 : 0;
         /* ورود به گره‌ی مقصد باید در جهتِ خلافِ بردارِ نرمالِ آن باشد؛ خروج از مبدأ در جهتِ بردار */
         if (cur.i === sI && cur.j === sJ && cur.d === 4) { if (DIRS[d][0] === -a.nx && DIRS[d][1] === -a.ny && (a.nx || a.ny)) turn += 80; }
@@ -162,15 +187,6 @@
     }
     return d + ' L' + pts[pts.length - 1].x + ' ' + pts[pts.length - 1].y;
   }
-  function midFree(pts, obs) { /* وسطِ بلندترین قطعه‌ای که داخلِ هیچ بلوکی نیست */
-    var best = null, bl = -1;
-    for (var i = 1; i < pts.length; i++) {
-      var a = pts[i - 1], b = pts[i], l = Math.hypot(b.x - a.x, b.y - a.y), m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, bad = false;
-      for (var q = 0; q < obs.length; q++) { var R = obs[q]; if (m.x > R.l + 14 && m.x < R.r - 14 && m.y > R.t + 14 && m.y < R.b - 14) { bad = true; break; } }
-      if (!bad && l > bl) { bl = l; best = m; }
-    }
-    return best || midOf(pts);
-  }
   function midOf(pts) {
     var tot = 0, i; for (i = 1; i < pts.length; i++) tot += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
     var half = tot / 2, acc = 0;
@@ -181,12 +197,56 @@
     }
     return pts[0];
   }
-  function recordUsed(pts, used) {
+  function recordUsed(pts, used, nets) {
     for (var i = 1; i < pts.length; i++) {
       var p = pts[i - 1], q = pts[i];
-      if (p.y === q.y) used.push({ h: true, c: p.y, lo: Math.min(p.x, q.x), hi: Math.max(p.x, q.x) });
-      else if (p.x === q.x) used.push({ h: false, c: p.x, lo: Math.min(p.y, q.y), hi: Math.max(p.y, q.y) });
+      if (p.y === q.y) used.push({ h: true, c: p.y, lo: Math.min(p.x, q.x), hi: Math.max(p.x, q.x), nets: nets || null });
+      else if (p.x === q.x) used.push({ h: false, c: p.x, lo: Math.min(p.y, q.y), hi: Math.max(p.y, q.y), nets: nets || null });
     }
+  }
+  /* مسیرِ یک خط: مستقیم اگر آزاد است؛ وگرنه A* با منعِ هم‌پوشانی؛ اگر راهی نبود، با جریمه؛ آخر از همه مسیرِ ساده */
+  function routeNet(pa, pb, obs, used, nets, skip) {
+    var q = quickRoute(pa, pb), ok = true;
+    for (var oi = 0; oi < obs.length && ok; oi++) {
+      var own = skip && skip.indexOf(oi) >= 0;
+      for (var si = own ? 2 : 1; si < (own ? q.length - 1 : q.length); si++) if (segHits(q[si - 1].x, q[si - 1].y, q[si].x, q[si].y, obs[oi])) { ok = false; break; }
+    }
+    for (var sj = 1; sj < q.length && ok; sj++) if (collide(q[sj - 1].x, q[sj - 1].y, q[sj].x, q[sj].y, used, nets)) ok = false;
+    if (ok) return q;
+    var H = routeOrtho(pa, pb, obs, used, nets, true);
+    if (H) return H;
+    var soft = routeOrtho(pa, pb, obs, used, nets, false) || q; soft.soft = true; return soft;
+  }
+  /* جای برچسب‌ها پس از کشیدنِ همهٔ خط‌ها: روی خطِ خودش، نه روی بلوک، نه روی برچسبِ دیگر، نه روی خطِ دیگر */
+  function labelBox(text) {
+    var f = '12px Vazirmatn, Tahoma, sans-serif', tw = textWidth(text, f), w = Math.min(200, tw + 25), lines = tw + 25 > 200 ? lineCount(text, 176, f) : 1;
+    return { w: w + 4, h: lines * 17.4 + 9 };
+  }
+  function placeLabels(list, rects) {
+    /* list: [{id, pts, text}] ← {id: {x,y}} */
+    var placed = [], out = {}, segs = [];
+    list.forEach(function (L) { for (var i = 1; i < L.pts.length; i++) segs.push({ id: L.id, a: L.pts[i - 1], b: L.pts[i] }); });
+    function hitsRect(R, M) { return R.l < M.r + 0 && R.r > M.l && R.t < M.b && R.b > M.t; }
+    list.forEach(function (L) {
+      if (!L.text) { out[L.id] = midOf(L.pts); return; }
+      var bx = labelBox(L.text), best = null, bestBad = 1e9, ts = [0.5, 0.42, 0.58, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82, 0.1, 0.9];
+      var order = []; for (var i = 1; i < L.pts.length; i++) order.push(i);
+      order.sort(function (x, y) { var lx = Math.abs(L.pts[x].x - L.pts[x - 1].x) + Math.abs(L.pts[x].y - L.pts[x - 1].y), ly = Math.abs(L.pts[y].x - L.pts[y - 1].x) + Math.abs(L.pts[y].y - L.pts[y - 1].y); return ly - lx; });
+      for (var oi = 0; oi < order.length && bestBad > 0; oi++) {
+        var a = L.pts[order[oi] - 1], b = L.pts[order[oi]];
+        for (var ti = 0; ti < ts.length && bestBad > 0; ti++) {
+          var p = { x: a.x + (b.x - a.x) * ts[ti], y: a.y + (b.y - a.y) * ts[ti] }, R = { l: p.x - bx.w / 2, r: p.x + bx.w / 2, t: p.y - bx.h / 2, b: p.y + bx.h / 2 }, bad = 0, q;
+          for (q = 0; q < rects.length; q++) if (hitsRect(R, { l: rects[q].l - 4, r: rects[q].r + 4, t: rects[q].t - 4, b: rects[q].b + 4 })) bad += 100;
+          for (q = 0; q < placed.length; q++) if (hitsRect(R, { l: placed[q].l - 6, r: placed[q].r + 6, t: placed[q].t - 6, b: placed[q].b + 6 })) bad += 100;
+          var E = { l: R.l - 3, r: R.r + 3, t: R.t - 3, b: R.b + 3 };
+          for (q = 0; q < segs.length; q++) if (segs[q].id !== L.id && segHits(segs[q].a.x, segs[q].a.y, segs[q].b.x, segs[q].b.y, E)) bad += 10;
+          if (bad < bestBad) { bestBad = bad; best = { p: p, R: R }; }
+        }
+      }
+      if (!best || bestBad > 0) { out[L.id] = { x: (best ? best.p : midOf(L.pts)).x, y: (best ? best.p : midOf(L.pts)).y, hide: true }; return; }
+      placed.push(best.R); out[L.id] = best.p;
+    });
+    return out;
   }
 
   /* ================= موتور ================= */
@@ -268,28 +328,25 @@
       var ca = { x: b.x + b.w / 2, y: b.y + b.h / 2 }, cb = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
       /* پیوندِ دوطرفه از لبه‌ای بیرون می‌آید که رو به بلوکِ دیگر است (همان ردیفِ پورت)؛ دورِ نقشه نمی‌چرخد */
       if (l.both && !l.noFlip) {
-        var flip = function (p, it, ot) { if (!p || !p.nx) return p; var oc = ot.x + ot.w / 2; if (p.nx > 0 && oc < it.x) return { x: it.x, y: p.y, nx: -1, ny: 0 }; if (p.nx < 0 && oc > it.x + it.w) return { x: it.x + it.w, y: p.y, nx: 1, ny: 0 }; return p; };
+        var flip = function (p, it, ot) { if (!p || !p.nx) return p; var oc = ot.x + ot.w / 2; if (p.nx > 0 && oc < it.x) return { x: it.x, y: p.y + 11, nx: -1, ny: 0 }; if (p.nx < 0 && oc > it.x + it.w) return { x: it.x + it.w, y: p.y + 11, nx: 1, ny: 0 }; return p; }; /* +۱۱: میانِ ردیف‌های پورتِ آن لبه، نه روی پورتِ دیگری */
         pa = flip(pa, a, b); pb = flip(pb, b, a);
       }
       if (!pa) pa = anchor(a, pb ? pb.x : ca.x, pb ? pb.y : ca.y);
       if (!pb) pb = anchor(b, pa.x, pa.y);
       return { a: pa, b: pb, from: a, to: b };
     }
+    /* هم‌شبکه = سرِ دقیقاً یکسان (شاخه‌شدنِ واقعی از یک نقطه)؛ دو خط که فقط به یک شکل می‌رسند هم‌شبکه نیستند */
+    function netsOf(l) { var e = (C.ep && C.ep[l.id]) || endpoints(l); if (!e) return []; return ['p' + Math.round(e.a.x) + ',' + Math.round(e.a.y), 'p' + Math.round(e.b.x) + ',' + Math.round(e.b.y)]; }
     function routeLink(l, quick, obs, used) {
-      var e = endpoints(l); if (!e) return null;
+      var e = (!quick && C.ep && C.ep[l.id]) || endpoints(l); if (!e) return null;
       var pts = null;
       if (!quick && o.route !== false) {
-        /* اول مسیرِ کوتاهِ مستقیم؛ اگر از شکلِ دیگری رد نشد همان بهتر است */
-        var q = quickRoute(e.a, e.b), ok = true, fi = -1, ti = -1;
+        var fi = -1, ti = -1;
         for (var z = 0; z < C.items.length; z++) { if (C.items[z].id === l.from) fi = z; if (C.items[z].id === l.to) ti = z; }
-        for (var oi = 0; oi < obs.length && ok; oi++) {
-          var own = oi === fi || oi === ti;
-          for (var si = own ? 2 : 1; si < (own ? q.length - 1 : q.length); si++) if (segHits(q[si - 1].x, q[si - 1].y, q[si].x, q[si].y, obs[oi])) { ok = false; break; }
-        }
-        pts = ok ? q : routeOrtho(e.a, e.b, obs, used);
+        pts = routeNet(e.a, e.b, obs, used, netsOf(l), [fi, ti]);
       }
       if (!pts) pts = quickRoute(e.a, e.b);
-      return { pts: pts, d: toPath(pts), mid: obs && !quick ? midFree(pts, obs) : midOf(pts) };
+      return { pts: pts, d: toPath(pts), mid: midOf(pts) };
     }
     function obstacles() { return C.items.map(function (it) { return { l: it.x - 14, t: it.y - 14, r: it.x + it.w + 14, b: it.y + it.h + 14 }; }); }
     function drawLink(l, g) {
@@ -309,7 +366,11 @@
       if (l.both) v.setAttribute('marker-start', markerFor(l.color)); else v.removeAttribute('marker-start');
       el.setAttribute('class', 'cvl' + (C.selLink === l.id ? ' sel' : '') + (l.locked ? ' locked' : ''));
       var lb = labelEl[l.id];
-      if (l.label) {
+      /* برچسبی که جای خالی روی خطِ خودش نیافت روی بوم نمی‌آید (روی چیزی نمی‌افتد)؛ متنش با نگه‌داشتنِ ماوس روی خط دیده می‌شود.
+         خطِ انتخاب‌شده همیشه برچسبش را نشان می‌دهد. */
+      var tt = el.querySelector('title');
+      if (l.label && geo.hideLbl) { if (!tt) { tt = sv('title', {}); el.appendChild(tt); } tt.textContent = l.label; } else if (tt) tt.remove();
+      if (l.label && (!geo.hideLbl || C.selLink === l.id)) {
         if (!lb) { lb = h('div', 'cv-lbl'); lb.setAttribute('data-lid', l.id); labelLayer.appendChild(lb); labelEl[l.id] = lb; }
         lb.textContent = l.label; lb.title = l.label; lb.style.left = geo.mid.x + 'px'; lb.style.top = geo.mid.y + 'px';
         lb.className = 'cv-lbl' + (C.selLink === l.id ? ' sel' : '');
@@ -326,12 +387,39 @@
       });
     }
     function drawAllLinks(quick, only) {
+      if (C.items.length > 160) quick = true;
       var obs = quick ? null : obstacles(), used = [];
-      if (C.items.length > 90) quick = true;
-      C.links.forEach(function (l) {
-        if (only && !only[l.from] && !only[l.to]) { if (C.geo[l.id]) { var old = C.geo[l.id]; if (!quick) recordUsed(old.pts, used); } return; }
-        var g = routeLink(l, quick, obs, used); if (g) { C.geo[l.id] = g; if (!quick) recordUsed(g.pts, used); }
+      /* خط‌های کوتاه‌تر اول: مسیرِ مستقیم مالِ آن‌هاست و خط‌های بلند دورشان می‌گردند */
+      var order = C.links.slice(), len = {}, EP = {}, ends = [];
+      order.forEach(function (l) {
+        var e = endpoints(l); if (!e) return; EP[l.id] = e;
+        len[l.id] = Math.abs(e.a.x - e.b.x) + Math.abs(e.a.y - e.b.y);
+        ends.push({ it: e.from, p: e.a, o: e.b, fixed: !!(l.fromPort || l.fa) }, { it: e.to, p: e.b, o: e.a, fixed: !!(l.toPort || l.ta) });
       });
+      if (!quick) spreadAnchors(ends);
+      C.ep = EP;
+      order.sort(function (x, y) { return len[x.id] - len[y.id]; });
+      /* سرِ کوتاهِ هر خط کنارِ پورتش از پیش رزرو می‌شود تا هیچ خطِ دیگری از رویش رد نشود.
+         اگر خطی راهِ بی‌هم‌پوشانی پیدا نکرد، دوباره چیده می‌شود و این بار آن خط اول می‌رود (تا ۴ دور؛ بهترین دور می‌ماند) */
+      var best = null;
+      for (var pass = 0; pass < (quick || only ? 1 : 4); pass++) {
+        used = []; var geo = {}, failed = [];
+        if (!quick) order.forEach(function (l) { var e = EP[l.id]; if (e) reserveStubs(e.a, e.b, used, netsOf(l)); });
+        order.forEach(function (l) {
+          if (only && !only[l.from] && !only[l.to]) { if (C.geo[l.id]) { geo[l.id] = C.geo[l.id]; if (!quick) recordUsed(C.geo[l.id].pts, used, netsOf(l)); } return; }
+          var g = routeLink(l, quick, obs, used); if (g) { geo[l.id] = g; if (g.pts.soft) failed.push(l); if (!quick) recordUsed(g.pts, used, netsOf(l)); }
+        });
+        if (!best || failed.length < best.failed.length) best = { geo: geo, failed: failed };
+        if (!failed.length) break;
+        var fs = {}; failed.forEach(function (l) { fs[l.id] = 1; });
+        order = failed.concat(order.filter(function (l) { return !fs[l.id]; }));
+      }
+      C.geo = best.geo;
+      if (!quick) {
+        var rects = C.items.map(function (it) { return { l: it.x, t: it.y, r: it.x + it.w, b: it.y + it.h }; });
+        var pos = placeLabels(order.filter(function (l) { return C.geo[l.id]; }).map(function (l) { return { id: l.id, pts: C.geo[l.id].pts, text: l.label || '' }; }), rects);
+        Object.keys(pos).forEach(function (id) { if (C.geo[id]) { C.geo[id].mid = { x: pos[id].x, y: pos[id].y }; C.geo[id].hideLbl = !!pos[id].hide; } });
+      }
       C.links.forEach(function (l) { drawLink(l); });
       placeHandles();
     }
@@ -626,5 +714,5 @@
     });
     return Math.max(1, n);
   }
-  W.PMCanvas = { textWidth: textWidth, lineCount: lineCount, anchorAt: anchorAt, create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
+  W.PMCanvas = { textWidth: textWidth, lineCount: lineCount, anchorAt: anchorAt, create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, routeNet: routeNet, reserveStubs: reserveStubs, spreadAnchors: spreadAnchors, recordUsed: recordUsed, placeLabels: placeLabels, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
 })(window);

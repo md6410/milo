@@ -43,7 +43,7 @@
   }
   /* هر شکلی که روی شکلِ دیگری افتاده، به پایین هل داده می‌شود (ترتیب و ستون‌ها حفظ می‌شود) */
   function separate(nodes, gap) {
-    gap = gap == null ? 26 : gap;
+    gap = gap == null ? 50 : gap; /* ۵۰: جای سرِ پیکان (۲۰) + حاشیهٔ شکل (۱۴) + راهرو */
     var L = nodes.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }), moved = false;
     for (var i = 1; i < L.length; i++) {
       var b = L[i], again = true, guard = 0;
@@ -65,7 +65,38 @@
       var d = (a.x + a.w / 2) - (b.x + b.w / 2); if (d && Math.abs(d) <= 16) b.x = Math.round(b.x + d);
     });
   }
-  function tidy(flow) { var f = fontOf(), ch = false; (flow.nodes || []).forEach(function (n) { if (fitNode(n, f)) ch = true; }); align(flow); if (separate(flow.nodes || [])) ch = true; return ch; }
+  /* مسیرِ همهٔ پیکان‌ها با قاعدهٔ بوم (کوتاه‌تر اول، رزروِ سرها، بی‌هم‌پوشانی) ← {R, soft: شمارِ پیکان‌هایی که راهِ تمیز نیافتند} */
+  function routeAll(flow) {
+    var nodes = flow.nodes || [], by = {}, idx = {};
+    nodes.forEach(function (n, i) { by[n.id] = n; idx[n.id] = i; });
+    var obs = nodes.map(function (n) { return { l: n.x - 14, t: n.y - 14, r: n.x + n.w + 14, b: n.y + n.h + 14 }; }), used = [], R = [];
+    (flow.edges || []).forEach(function (e) {
+      var a = by[e.from], b = by[e.to]; if (!a || !b) return;
+      var pa = e.fa ? CV.anchorAt(a, e.fa) : CV.anchor(a, e.ta ? CV.anchorAt(b, e.ta).x : b.x + b.w / 2, e.ta ? CV.anchorAt(b, e.ta).y : b.y + b.h / 2), pb = e.ta ? CV.anchorAt(b, e.ta) : CV.anchor(b, pa.x, pa.y);
+      R.push({ e: e, pa: pa, pb: pb, len: Math.abs(pa.x - pb.x) + Math.abs(pa.y - pb.y), nets: [e.from + '>' + JSON.stringify(e.fa || ''), e.to + '<' + JSON.stringify(e.ta || '')] });
+    });
+    var ends = []; R.forEach(function (r) { var a = by[r.e.from], b = by[r.e.to], sa = (TYPES[a.type] || TYPES.process).shape, sb = (TYPES[b.type] || TYPES.process).shape;
+      ends.push({ it: { id: a.id, x: a.x, y: a.y, w: a.w, h: a.h, shape: sa }, p: r.pa, o: r.pb, fixed: !!r.e.fa }, { it: { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: sb }, p: r.pb, o: r.pa, fixed: !!r.e.ta }); });
+    CV.spreadAnchors(ends);
+    R.forEach(function (r) { r.nets = ['p' + Math.round(r.pa.x) + ',' + Math.round(r.pa.y), 'p' + Math.round(r.pb.x) + ',' + Math.round(r.pb.y)]; });
+    R.sort(function (x, y) { return x.len - y.len; });
+    R.forEach(function (r) { CV.reserveStubs(r.pa, r.pb, used, r.nets); });
+    var soft = 0;
+    R.forEach(function (r) { r.pts = CV.routeNet(r.pa, r.pb, obs, used, r.nets, [idx[r.e.from], idx[r.e.to]]); if (r.pts.soft) soft++; CV.recordUsed(r.pts, used, r.nets); });
+    return { R: R, soft: soft };
+  }
+  /* اگر پیکانی جای تمیز ندارد، شکل‌ها از مرکز باز می‌شوند (×۱٫۳، حداکثر ۴ بار) تا هر خط راهروی خودش را بیابد */
+  function spread(flow) {
+    var nodes = flow.nodes || [];
+    if (nodes.length < 2 || nodes.length > 160) return false;
+    for (var it = 0; it < 4; it++) {
+      if (!routeAll(flow).soft) return it > 0;
+      var cx = 0, cy = 0; nodes.forEach(function (n) { cx += n.x + n.w / 2; cy += n.y + n.h / 2; }); cx /= nodes.length; cy /= nodes.length;
+      nodes.forEach(function (n) { n.x = Math.round(cx + (n.x + n.w / 2 - cx) * 1.3 - n.w / 2); n.y = Math.round(cy + (n.y + n.h / 2 - cy) * 1.3 - n.h / 2); });
+    }
+    return true;
+  }
+  function tidy(flow) { var f = fontOf(), ch = false; (flow.nodes || []).forEach(function (n) { if (fitNode(n, f)) ch = true; }); align(flow); if (separate(flow.nodes || [])) ch = true; if (spread(flow)) ch = true; return ch; }
   /* چیدمانِ لایه‌ای از بالا به پایین: ترتیب از روی پیکان‌ها، هر شکل زیرِ شکل‌های پیشینش */
   function arrange(flow) {
     var nodes = flow.nodes || [], edges = flow.edges || [], by = {}, out = {}, pre = {};
@@ -128,16 +159,16 @@
     Object.keys(cols).forEach(function (c) { s += '<marker id="m' + c.replace('#', '') + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="' + c + '"/></marker>'; });
     s += '</defs>';
     if (bg) s += '<rect x="' + vb[0] + '" y="' + vb[1] + '" width="' + vb[2] + '" height="' + vb[3] + '" fill="' + bg + '"/>';
-    var obs = nodes.map(function (n) { return { l: n.x - 14, t: n.y - 14, r: n.x + n.w + 14, b: n.y + n.h + 14 }; }), used = [];
-    (flow.edges || []).forEach(function (e) {
-      var a = by[e.from], b = by[e.to]; if (!a || !b) return;
-      var pa = e.fa ? CV.anchorAt(a, e.fa) : CV.anchor(a, e.ta ? CV.anchorAt(b, e.ta).x : b.x + b.w / 2, e.ta ? CV.anchorAt(b, e.ta).y : b.y + b.h / 2), pb = e.ta ? CV.anchorAt(b, e.ta) : CV.anchor(b, pa.x, pa.y), col = e.color || '#7d88a3';
-      var pts = (nodes.length < 90 && CV.route(pa, pb, obs, used)) || CV.quickRoute(pa, pb);
-      var d = CV.toPath(pts), mid = CV.midOf(pts);
-      for (var q = 1; q < pts.length; q++) { var u = pts[q - 1], w = pts[q]; if (u.y === w.y) used.push({ h: true, c: u.y, lo: Math.min(u.x, w.x), hi: Math.max(u.x, w.x) }); else if (u.x === w.x) used.push({ h: false, c: u.x, lo: Math.min(u.y, w.y), hi: Math.max(u.y, w.y) }); }
+    var R = routeAll(flow).R;
+    var rects = nodes.map(function (n) { return { l: n.x, t: n.y, r: n.x + n.w, b: n.y + n.h }; });
+    var mids = CV.placeLabels(R.map(function (r, i) { return { id: 'r' + i, pts: r.pts, text: r.e.label || '' }; }), rects), labels = '';
+    R.forEach(function (r, i) {
+      var e = r.e, col = e.color || '#7d88a3', d = CV.toPath(r.pts), mid = mids['r' + i] || CV.midOf(r.pts);
       s += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" marker-end="url(#m' + col.replace('#', '') + ')"/>';
-      if (e.label) s += '<rect x="' + (mid.x - e.label.length * 3.6 - 6) + '" y="' + (mid.y - 11) + '" width="' + (e.label.length * 7.2 + 12) + '" height="20" rx="10" fill="' + (bg || '#fff') + '" stroke="' + col + '"/><text x="' + mid.x + '" y="' + (mid.y + 4) + '" font-size="12" text-anchor="middle" fill="' + ink + '">' + esc(e.label) + '</text>';
+      if (e.label && mid.hide) s += '<title>' + esc(e.label) + '</title>';
+      else if (e.label) { var lw = CV.textWidth(e.label, '12px Vazirmatn, Tahoma, sans-serif') + 18; labels += '<rect x="' + (mid.x - lw / 2) + '" y="' + (mid.y - 11) + '" width="' + lw + '" height="20" rx="10" fill="' + (bg || '#fff') + '" stroke="' + col + '"/><text x="' + mid.x + '" y="' + (mid.y + 4) + '" font-size="12" text-anchor="middle" fill="' + ink + '">' + esc(e.label) + '</text>'; }
     });
+    s += labels;
     nodes.forEach(function (n) {
       var col = colorOf(n) || ink, t = TYPES[n.type] || TYPES.process;
       s += '<g transform="translate(' + n.x + ' ' + n.y + ')">';
