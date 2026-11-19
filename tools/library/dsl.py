@@ -227,16 +227,17 @@ def container_flow(c):
         cols.setdefault(layer[k.id], []).append(k)
     ids = {}
     cx = 330
+    maxl = max(layer.values()) if layer else 0
+    # راست‌به‌چپ مثلِ Milo: ورودی‌ها سمتِ راست، خروجی‌ها سمتِ چپ
     for L in sorted(cols):
         for r, k in enumerate(cols[L]):
             typ = 'sub' if k.kind != 'task' else 'process'
-            ids[k.id] = add(typ, k.title, cx + L * 300, r * 120 + 20, w=210)
+            ids[k.id] = add(typ, k.title, cx + (maxl - L) * 300, r * 120 + 20, w=210)
     inp_ids, out_ids = {}, {}
     for r, p in enumerate(c.ins):
-        inp_ids[p['name']] = add('io', p['name'], 0, r * 100 + 10, port={'side': 'in', 'name': p['name']}, w=190)
-    maxl = max(layer.values()) if layer else 0
+        inp_ids[p['name']] = add('io', p['name'], cx + (maxl + 1) * 300, r * 100 + 10, port={'side': 'in', 'name': p['name']}, w=190)
     for r, p in enumerate(c.outs):
-        out_ids[p['name']] = add('io', p['name'], cx + (maxl + 1) * 300, r * 100 + 10, port={'side': 'out', 'name': p['name']}, w=190)
+        out_ids[p['name']] = add('io', p['name'], 0, r * 100 + 10, port={'side': 'out', 'name': p['name']}, w=190)
     for port, child, cp in c.bin:
         edge(inp_ids[port], ids[child.id], cp if cp != port else '')
     for a, o, b, i, l, tw in c.links:

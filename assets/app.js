@@ -364,9 +364,15 @@ var ICONS = ['📦', '🧩', '⚙️', '🔐', '👤', '🛒', '💳', '📊', '
 var KSIZE = { area: { w: 300, h: 160 }, section: { w: 280, h: 140 }, module: { w: 280, h: 140 }, task: { w: 250, h: 112 } };
 function nodeColor(n) { return n.color || KCOL[n.kind]; }
 function portTop(n) { return n.kind === 'task' ? 64 : 78; }
+var BFONT = null;
 function blockDims(n) {
-  var b = KSIZE[n.kind] || KSIZE.module, rows = Math.min(8, Math.max((n.inputs || []).length, (n.outputs || []).length));
-  return { w: b.w, h: Math.max(b.h, portTop(n) + rows * 22 + 54) };
+  /* پهنا از روی بلندترین نامِ ورودی/خروجی و عنوان؛ تا هیچ نامی بریده نشود (سقف ۵۶۰) */
+  if (!BFONT) { var ff = 'Vazirmatn, Tahoma, sans-serif'; try { ff = getComputedStyle(document.body).fontFamily || ff; } catch (e) { } BFONT = { p: '11.5px ' + ff, t: '700 14.5px ' + ff }; }
+  var b = KSIZE[n.kind] || KSIZE.module, ins = (n.inputs || []).slice(0, 8), outs = (n.outputs || []).slice(0, 8), rows = Math.max(ins.length, outs.length);
+  var pw = function (list) { return list.reduce(function (m, p) { return Math.max(m, PMCanvas.textWidth(p.name, BFONT.p) + 18); }, 0); };
+  var need = Math.max(pw(ins), pw(outs)) / 0.45 + 6, tw = PMCanvas.textWidth(n.title, BFONT.t) / 2 + 40;
+  var w = Math.round(Math.min(560, Math.max(b.w, need, tw)) / 10) * 10;
+  return { w: w, h: Math.max(b.h, portTop(n) + rows * 22 + 54) };
 }
 function portStateMap(n) { var m = {}; E.portStatus(n, S.P.deps).forEach(function (s) { m[s.side + ':' + s.name] = s.state; }); return m; }
 function blockPorts(n) {
@@ -389,18 +395,33 @@ function blockHtml(n, v, ghost) {
 }
 /* چیدمانِ لایه‌ای (پیش‌نیازها راست، پس‌نیازها چپ) برای بلوک‌هایی که هنوز جایگاهِ ثبت‌شده ندارند */
 function autoLayout(kids, edges, dims) {
-  var preds = {}; kids.forEach(function (k) { preds[k] = []; });
-  edges.forEach(function (e) { if (preds[e.b] && preds[e.a]) preds[e.b].push(e.a); });
+  /* پیوندِ دوطرفه ترتیبِ ساخت نمی‌سازد، پس در لایه‌بندی نمی‌آید */
+  var preds = {}, succ = {}; kids.forEach(function (k) { preds[k] = []; succ[k] = []; });
+  edges.forEach(function (e) { if (e.both || (e.real && e.real.two)) return; if (preds[e.b] && preds[e.a] && e.a !== e.b) { preds[e.b].push(e.a); succ[e.a].push(e.b); } });
   var layer = {}, vis = {};
   function lay(n) { if (layer[n] != null) return layer[n]; if (vis[n]) return 0; vis[n] = 1; var m = 0; preds[n].forEach(function (p) { m = Math.max(m, lay(p) + 1); }); vis[n] = 0; layer[n] = m; return m; }
   kids.forEach(lay);
   var cols = {}; kids.forEach(function (k) { (cols[layer[k]] = cols[layer[k]] || []).push(k); });
-  var pos = {}, GX = 120, GY = 40, xoff = 0, ks = Object.keys(cols).map(Number).sort(function (a, b) { return a - b; });
-  var colH = {}; ks.forEach(function (c) { colH[c] = cols[c].reduce(function (s, k) { return s + dims[k].h; }, 0) + (cols[c].length - 1) * GY; });
+  var ks = Object.keys(cols).map(Number).sort(function (a, b) { return a - b; });
+  /* ترتیبِ هر ستون با میانگینِ جایگاهِ همسایه‌ها (کمترین تقاطعِ خط‌ها) */
+  var ord = {}; ks.forEach(function (c) { cols[c].forEach(function (k, i) { ord[k] = i; }); });
+  for (var sw = 0; sw < 6; sw++) {
+    var seq = sw % 2 ? ks.slice().reverse() : ks;
+    seq.forEach(function (c) {
+      var nb = sw % 2 ? succ : preds, b2 = {};
+      cols[c].forEach(function (k) { var a = nb[k]; b2[k] = a.length ? a.reduce(function (s2, x) { return s2 + ord[x]; }, 0) / a.length : ord[k]; });
+      cols[c].sort(function (x, y) { return b2[x] - b2[y] || ord[x] - ord[y]; });
+      cols[c].forEach(function (k, i) { ord[k] = i; });
+    });
+  }
+  /* فاصلهٔ ستون‌ها به اندازهٔ شمارِ خط‌هایی که از آن می‌گذرند (هر خط راهروی خودش) */
+  var gapN = {}; edges.forEach(function (e) { if (layer[e.a] == null || layer[e.b] == null) return; var lo = Math.min(layer[e.a], layer[e.b]), hi = Math.max(layer[e.a], layer[e.b]); for (var c = lo; c < Math.max(hi, lo + 1); c++) gapN[c] = (gapN[c] || 0) + 1; });
+  var pos = {}, GY = 60, xoff = 0;
+  var colH = {}; ks.forEach(function (c) { colH[c] = cols[c].reduce(function (s2, k) { return s2 + dims[k].h; }, 0) + (cols[c].length - 1) * GY; });
   var H = Math.max.apply(null, ks.map(function (c) { return colH[c]; }).concat([0]));
   ks.forEach(function (c) {
     var list = cols[c], w = Math.max.apply(null, list.map(function (k) { return dims[k].w; })), y = (H - colH[c]) / 2;
-    xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += GX;
+    xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += 150 + 14 * Math.min(gapN[c] || 0, 24);
   });
   return pos;
 }
@@ -441,6 +462,14 @@ function mapModel(forceAuto) {
     minx = Math.min(minx, x); maxx = Math.max(maxx, x + d.w); miny = Math.min(miny, y);
     items.push({ id: String(id), x: x, y: y, w: d.w, h: d.h, shape: 'card', cls: 'kk-' + n.kind, color: nodeColor(n), html: blockHtml(n, v), text: n.title, node: n, ports: blockPorts(n) });
   });
+  /* بلوکی که روی بلوکِ دیگری افتاده (بلوکِ تازه، پهن‌ترشدن…) به پایین هل داده می‌شود؛ هیچ دو بلوکی روی هم نمی‌مانند */
+  var LS = items.slice().sort(function (p, q) { return p.y - q.y || p.x - q.x; });
+  for (var oi = 1; oi < LS.length; oi++) {
+    for (var again = true, g2 = 0; again && g2 < 100; g2++) {
+      again = false;
+      for (var oj = 0; oj < oi; oj++) { var A = LS[oj], B = LS[oi]; if (A.x < B.x + B.w + 40 && B.x < A.x + A.w + 40 && A.y < B.y + B.h + 40 && B.y < A.y + A.h + 40) { B.y = A.y + A.h + 40; again = true; } }
+    }
+  }
   var gi = 0, go = 0;
   Object.keys(ghosts).forEach(function (g) {
     var n = idx.byId.get(+g), v = sch.info.get(+g) || {}, inn = ghosts[g] === 'in', d = blockDims(n), yy = miny + (inn ? gi++ : go++) * (d.h + 36);
@@ -454,6 +483,18 @@ function mapModel(forceAuto) {
     if (!cnt) { ex0 = 0; ex1 = 320; ysum = 140; cnt = 1; }
     var ymid = ysum / cnt, mk = function (side, list, x) {
       var total = list.length + (S.editing ? 1 : 0), y0 = ymid - (total * RH + (total - 1) * RG) / 2;
+      /* ترتیبِ ریل هم‌راستا با بلوک‌های مقصد (میانگینِ ارتفاعِ پورت‌هایشان) تا خط‌ها از روی هم رد نشوند */
+      var yOf = {}; items.forEach(function (it) { yOf[it.id] = it; });
+      var tgt = function (p) {
+        var ys = [];
+        S.P.deps.forEach(function (d) {
+          if (side === 'in' && d.bnd === 'in' && d.from_id === focus && d.out_name === p.name) { var it = yOf[String(d.to_id)]; if (it) { var pp = (it.ports && it.ports['in'] || []).filter(function (q) { return q.name === d.in_name; })[0]; ys.push(it.y + (pp ? pp.y : it.h / 2)); } }
+          if (side === 'out' && d.bnd === 'out' && d.to_id === focus && d.in_name === p.name) { var it2 = yOf[String(d.from_id)]; if (it2) { var po = (it2.ports && it2.ports.out || []).filter(function (q) { return q.name === d.out_name; })[0]; ys.push(it2.y + (po ? po.y : it2.h / 2)); } }
+        });
+        return ys.length ? ys.reduce(function (a2, b2) { return a2 + b2; }, 0) / ys.length : 1e9;
+      };
+      var keyY = {}; list.forEach(function (p, i) { keyY[p.name] = tgt(p) + i * 1e-3; });
+      list = list.slice().sort(function (a2, b2) { return keyY[a2.name] - keyY[b2.name]; });
       list.forEach(function (p, i) {
         var st = fsm[side + ':' + p.name] || 'none', warn = st === 'none' || st === 'dangling';
         var pt = { name: p.name, y: RH / 2, unused: st === 'unused', warn: warn, tip: E.PORT_MSG[st] || '' };

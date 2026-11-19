@@ -69,8 +69,19 @@
     obs.forEach(function (o) { xs.push(o.l, o.r); ys.push(o.t, o.b); });
     xs.sort(function (p, q) { return p - q; }); ys.sort(function (p, q) { return p - q; });
     xs = xs.filter(function (v, k) { return k === 0 || v !== xs[k - 1]; }); ys = ys.filter(function (v, k) { return k === 0 || v !== ys[k - 1]; });
+    /* راهروهای موازی میانِ بلوک‌ها: هر خط راهروی خودش را می‌گیرد و خط‌ها روی هم نمی‌افتند */
+    function lanes(v) {
+      var o = [];
+      for (var q = 0; q < v.length; q++) {
+        o.push(v[q]);
+        var g = q + 1 < v.length ? v[q + 1] - v[q] : 0;
+        if (g >= 44) { var n = Math.min(5, Math.floor(g / 22)); for (var z = 1; z < n; z++) o.push(Math.round(v[q] + g * z / n)); }
+      }
+      return o;
+    }
+    xs = lanes(xs); ys = lanes(ys);
     var nx = xs.length, ny = ys.length;
-    if (nx * ny > 9000) return null;
+    if (nx * ny > 30000) return null;
     var ix = {}, iy = {}; xs.forEach(function (v, k) { ix[v] = k; }); ys.forEach(function (v, k) { iy[v] = k; });
     var sI = ix[A.x], sJ = iy[A.y], tI = ix[B.x], tJ = iy[B.y];
     var freeMemo = {};
@@ -85,8 +96,8 @@
       var p = 0;
       for (var q = 0; q < used.length; q++) {
         var u = used[q];
-        if (y1 === y2 && u.h && Math.abs(u.c - y1) < 4 && Math.max(x1, x2) > u.lo && Math.min(x1, x2) < u.hi) p += 60;
-        else if (x1 === x2 && !u.h && Math.abs(u.c - x1) < 4 && Math.max(y1, y2) > u.lo && Math.min(y1, y2) < u.hi) p += 60;
+        if (y1 === y2 && u.h && Math.abs(u.c - y1) < 6 && Math.max(x1, x2) > u.lo && Math.min(x1, x2) < u.hi) p += 400;
+        else if (x1 === x2 && !u.h && Math.abs(u.c - x1) < 6 && Math.max(y1, y2) > u.lo && Math.min(y1, y2) < u.hi) p += 400;
       }
       return p;
     }
@@ -96,7 +107,7 @@
     var st = { i: sI, j: sJ, d: 4, g: 0, f: hfun(sI, sJ) };
     heap.push(st); best[key(sI, sJ, 4)] = 0;
     var guard = 0;
-    while (heap.size() && guard++ < 40000) {
+    while (heap.size() && guard++ < 90000) {
       var cur = heap.pop();
       if (cur.g > (best[key(cur.i, cur.j, cur.d)] != null ? best[key(cur.i, cur.j, cur.d)] : 1e18)) continue;
       if (cur.i === tI && cur.j === tJ) { if (cur.d !== 4 && (b.nx || b.ny) && DIRS[cur.d][0] === b.nx && DIRS[cur.d][1] === b.ny) continue; goal = cur; break; }
@@ -255,6 +266,11 @@
       var a = byId(l.from), b = byId(l.to); if (!a || !b) return null;
       var pa = l.fromPort ? portAnchor(a, 'out', l.fromPort) : (l.fa ? anchorAt(a, l.fa) : null), pb = l.toPort ? portAnchor(b, 'in', l.toPort) : (l.ta ? anchorAt(b, l.ta) : null);
       var ca = { x: b.x + b.w / 2, y: b.y + b.h / 2 }, cb = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
+      /* پیوندِ دوطرفه از لبه‌ای بیرون می‌آید که رو به بلوکِ دیگر است (همان ردیفِ پورت)؛ دورِ نقشه نمی‌چرخد */
+      if (l.both && !l.noFlip) {
+        var flip = function (p, it, ot) { if (!p || !p.nx) return p; var oc = ot.x + ot.w / 2; if (p.nx > 0 && oc < it.x) return { x: it.x, y: p.y, nx: -1, ny: 0 }; if (p.nx < 0 && oc > it.x + it.w) return { x: it.x + it.w, y: p.y, nx: 1, ny: 0 }; return p; };
+        pa = flip(pa, a, b); pb = flip(pb, b, a);
+      }
       if (!pa) pa = anchor(a, pb ? pb.x : ca.x, pb ? pb.y : ca.y);
       if (!pb) pb = anchor(b, pa.x, pa.y);
       return { a: pa, b: pb, from: a, to: b };
@@ -425,11 +441,12 @@
     /* ----- نما ----- */
     C.fit = function (pad) {
       pad = pad == null ? 50 : pad;
+      var side = pad + (o.fitSide || 0); /* جای نوارهای کناری (مثلِ ورودی/خروجی‌های فلوچارت) تا روی شکل‌ها نیفتند */
       var r = host.getBoundingClientRect();
       if (!C.items.length || !r.width) { C.view = { x: 40, y: 40, k: 1 }; applyView(); return; }
       var minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9;
       C.items.forEach(function (it) { minx = Math.min(minx, it.x); miny = Math.min(miny, it.y); maxx = Math.max(maxx, it.x + it.w); maxy = Math.max(maxy, it.y + it.h); });
-      var k = Math.max(0.25, Math.min(1.2, Math.min((r.width - pad * 2) / (maxx - minx), (r.height - pad * 2) / (maxy - miny))));
+      var k = Math.max(0.25, Math.min(1.2, Math.min((r.width - side * 2) / (maxx - minx), (r.height - pad * 2) / (maxy - miny))));
       C.view = { k: k, x: (r.width - (maxx - minx) * k) / 2 - minx * k, y: (r.height - (maxy - miny) * k) / 2 - miny * k };
       applyView();
     };
@@ -586,5 +603,28 @@
     return C;
   }
 
-  W.PMCanvas = { anchorAt: anchorAt, create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
+  /* اندازهٔ واقعیِ متن (برای اینکه هیچ متنی زیرِ لبهٔ جعبه نرود) */
+  var mctx = null;
+  function textWidth(t, font) {
+    if (!mctx) { try { mctx = document.createElement('canvas').getContext('2d'); } catch (e) { mctx = null; } }
+    if (!mctx) return String(t || '').length * 7.5;
+    mctx.font = font || '13.5px Vazirmatn, Tahoma, sans-serif';
+    return mctx.measureText(String(t || '')).width;
+  }
+  /* شمارِ سطرهای متن در عرضِ w (شکستنِ واژه‌ها مثلِ word-break: break-word) */
+  function lineCount(t, w, font) {
+    var n = 0;
+    String(t || '').split('\n').forEach(function (ln) {
+      var cur = 0, sp = textWidth(' ', font), c = 1;
+      ln.split(/\s+/).forEach(function (wd) {
+        if (!wd) return;
+        var ww = textWidth(wd, font);
+        if (ww > w) { if (cur > 0) { c++; } c += Math.ceil(ww / w) - 1; cur = ww % w; return; }
+        if (cur === 0) cur = ww; else if (cur + sp + ww <= w) cur += sp + ww; else { c++; cur = ww; }
+      });
+      n += c;
+    });
+    return Math.max(1, n);
+  }
+  W.PMCanvas = { textWidth: textWidth, lineCount: lineCount, anchorAt: anchorAt, create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
 })(window);

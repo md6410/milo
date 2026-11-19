@@ -151,7 +151,7 @@ pre.code{direction:ltr;text-align:left;background:var(--bg);border:1px solid var
 .cvsh{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 .cvsh path{fill:color-mix(in srgb,var(--ic,#2f6fed) 15%,var(--card));stroke:var(--ic,#2f6fed);stroke-width:2;stroke-linejoin:round}
 .cvi.fl-text .cvsh{display:none}
-.cvt{position:absolute;inset:6px 10px;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;line-height:1.5;font-size:13.5px;pointer-events:none;word-break:break-word}
+.cvt{position:absolute;inset:6px 10px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;line-height:1.5;font-size:13.5px;pointer-events:none;word-break:break-word}
 .cvs-diamond .cvt{inset:20% 24%}.cvs-para .cvt{inset:6px 30px}.cvs-db .cvt{inset:22% 10px 6px}.cvs-sub .cvt{inset:6px 22px}
 .cvp{position:absolute;width:15px;height:15px;border-radius:50%;background:var(--pri);border:2.5px solid var(--card);opacity:0;transform:translate(-50%,-50%);cursor:crosshair;z-index:4;transition:opacity .12s,transform .12s;box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .cvi:hover .cvp,.cvi.sel .cvp{opacity:1}.cvp:hover{transform:translate(-50%,-50%) scale(1.35)}
