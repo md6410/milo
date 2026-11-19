@@ -46,7 +46,7 @@
   }
   /* هر شکلی که روی شکلِ دیگری افتاده، به پایین هل داده می‌شود (ترتیب و ستون‌ها حفظ می‌شود) */
   function separate(nodes, gap) {
-    gap = gap == null ? 100 : gap; /* ۷۰: دو خطِ صافِ خروج/ورود (۲۴) + راهرو */
+    gap = gap == null ? 70 : gap; /* ۷۰: دو خطِ صافِ خروج/ورود (۲۴) + راهرو */
     var L = nodes.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }), moved = false;
     for (var i = 1; i < L.length; i++) {
       var b = L[i], again = true, guard = 0;
@@ -72,49 +72,35 @@
   function routeAll(flow) {
     var nodes = flow.nodes || [], by = {}, idx = {};
     nodes.forEach(function (n, i) { by[n.id] = n; idx[n.id] = i; });
-    var obs = nodes.map(function (n) { return { l: n.x - 28, t: n.y - 28, r: n.x + n.w + 28, b: n.y + n.h + 28 }; }), used = [], R = [];
+    var obs = nodes.map(function (n) { return { l: n.x - 14, t: n.y - 14, r: n.x + n.w + 14, b: n.y + n.h + 14 }; }), used = [], R = [];
     (flow.edges || []).forEach(function (e) {
       var a = by[e.from], b = by[e.to]; if (!a || !b) return;
       var pa = e.fa ? CV.anchorAt(a, e.fa) : CV.anchor(a, e.ta ? CV.anchorAt(b, e.ta).x : b.x + b.w / 2, e.ta ? CV.anchorAt(b, e.ta).y : b.y + b.h / 2), pb = e.ta ? CV.anchorAt(b, e.ta) : CV.anchor(b, pa.x, pa.y);
       R.push({ e: e, pa: pa, pb: pb, len: Math.abs(pa.x - pb.x) + Math.abs(pa.y - pb.y), nets: [e.from + '>' + JSON.stringify(e.fa || ''), e.to + '<' + JSON.stringify(e.ta || '')] });
     });
     var ends = []; R.forEach(function (r) { var a = by[r.e.from], b = by[r.e.to], sa = (TYPES[a.type] || TYPES.process).shape, sb = (TYPES[b.type] || TYPES.process).shape;
-      ends.push({ it: { id: a.id, x: a.x, y: a.y, w: a.w, h: a.h, shape: sa }, p: r.pa, o: r.pb, dir: 'out', fixed: !!r.e.fa }, { it: { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: sb }, p: r.pb, o: r.pa, dir: 'in', fixed: !!r.e.ta }); });
+      ends.push({ it: { id: a.id, x: a.x, y: a.y, w: a.w, h: a.h, shape: sa }, p: r.pa, o: r.pb, fixed: !!r.e.fa }, { it: { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: sb }, p: r.pb, o: r.pa, fixed: !!r.e.ta }); });
     CV.spreadAnchors(ends);
-    R.forEach(function (r) { r.pa.stub = r.pb.stub = 30; r.pa.lanes = 30; });
-    R.forEach(function (r) { r.nets = ['o' + Math.round(r.pa.x) + ',' + Math.round(r.pa.y), 'i' + Math.round(r.pb.x) + ',' + Math.round(r.pb.y)]; });
+    R.forEach(function (r) { r.pa.stub = r.pb.stub = 24; });
+    R.forEach(function (r) { r.nets = ['p' + Math.round(r.pa.x) + ',' + Math.round(r.pa.y), 'p' + Math.round(r.pb.x) + ',' + Math.round(r.pb.y)]; });
     R.sort(function (x, y) { return x.len - y.len; });
     R.forEach(function (r) { CV.reserveStubs(r.pa, r.pb, used, r.nets); });
     var soft = 0;
-    R.forEach(function (r) { r.pts = CV.routeNet(r.pa, r.pb, obs, used, r.nets, [idx[r.e.from], idx[r.e.to]]); if (r.pts.soft) soft++; CV.recordRoute(r.pts, used, 30, 30, r.nets); });
+    R.forEach(function (r) { r.pts = CV.routeNet(r.pa, r.pb, obs, used, r.nets, [idx[r.e.from], idx[r.e.to]]); if (r.pts.soft) soft++; CV.recordRoute(r.pts, used, 24, 24, r.nets); });
     return { R: R, soft: soft };
   }
   /* اگر پیکانی جای تمیز ندارد، شکل‌ها از مرکز باز می‌شوند (×۱٫۳، حداکثر ۴ بار) تا هر خط راهروی خودش را بیابد */
-  function spread(flow, noArrange) {
+  function spread(flow) {
     var nodes = flow.nodes || [];
     if (nodes.length < 2 || nodes.length > 160) return false;
-    var orig = nodes.map(function (n) { return [n.x, n.y]; });
     for (var it = 0; it < 4; it++) {
       if (!routeAll(flow).soft) return it > 0;
       var cx = 0, cy = 0; nodes.forEach(function (n) { cx += n.x + n.w / 2; cy += n.y + n.h / 2; }); cx /= nodes.length; cy /= nodes.length;
       nodes.forEach(function (n) { n.x = Math.round(cx + (n.x + n.w / 2 - cx) * 1.3 - n.w / 2); n.y = Math.round(cy + (n.y + n.h / 2 - cy) * 1.3 - n.h / 2); });
     }
-    if (!routeAll(flow).soft) return true;
-    /* باز کردن کافی نبود (مثلاً ستونِ بلند): چیدمانِ خودکار و دوباره آزمون — هیچ پیکانی بی‌راهِ تمیز نمی‌ماند */
-    nodes.forEach(function (n, i) { n.x = orig[i][0]; n.y = orig[i][1]; });
-    if (noArrange) return true;
-    arrange(flow); separate(nodes);
-    spread(flow, true);
     return true;
   }
-  /* شکلی که پیکان‌های زیادی دارد آن‌قدر پهن می‌شود که هر پیکان نقطهٔ خودش را با ۱۶ فاصله داشته باشد */
-  function widen(flow) {
-    var deg = {}, ch = false;
-    (flow.edges || []).forEach(function (e) { deg[e.from] = deg[e.from] || { i: 0, o: 0 }; deg[e.to] = deg[e.to] || { i: 0, o: 0 }; deg[e.from].o++; deg[e.to].i++; });
-    (flow.nodes || []).forEach(function (n) { var d = deg[n.id]; if (!d || n.type === 'decision') return; var need = (Math.max(d.i, d.o) + 1) * 16; if (n.w < need) { n.x = Math.round(n.x - (need - n.w) / 2); n.w = need; ch = true; } });
-    return ch;
-  }
-  function tidy(flow) { var f = fontOf(), ch = false; (flow.nodes || []).forEach(function (n) { if (fitNode(n, f)) ch = true; }); if (widen(flow)) ch = true; align(flow); if (separate(flow.nodes || [])) ch = true; if (spread(flow)) ch = true; return ch; }
+  function tidy(flow) { var f = fontOf(), ch = false; (flow.nodes || []).forEach(function (n) { if (fitNode(n, f)) ch = true; }); align(flow); if (separate(flow.nodes || [])) ch = true; if (spread(flow)) ch = true; return ch; }
   /* چیدمانِ لایه‌ای از بالا به پایین: ترتیب از روی پیکان‌ها، هر شکل زیرِ شکل‌های پیشینش */
   function arrange(flow) {
     var nodes = flow.nodes || [], edges = flow.edges || [], by = {}, out = {}, pre = {};
@@ -144,9 +130,7 @@
       row.forEach(function (n) { var x = Math.max(n._d - n.w / 2, right + GX); n.x = Math.round(x); right = x + n.w; want += n._d; got += x + n.w / 2; });
       var sh = Math.round((want - got) / row.length);
       var hmax = 0; row.forEach(function (n) { n.x += sh; n.y = y; cx[n.id] = n.x + n.w / 2; hmax = Math.max(hmax, n.h); delete n._d; });
-      /* فاصلهٔ این ردیف تا بعدی به اندازهٔ پیکان‌هایی که از آن می‌گذرند (هرکدام راهروی ۱۶) */
-      var cross = 0; fwd.forEach(function (p2) { if (layer[p2[0]] <= r && layer[p2[1]] > r) cross++; });
-      y += hmax + GY + 60 + 16 * Math.min(cross, 60);
+      y += hmax + GY;
     });
     /* شکل‌های بی‌پیکان (یادداشت‌ها) در ستونی کنارِ نمودار */
     var minx = 1e9; nodes.forEach(function (n) { if (layer[n.id] != null) minx = Math.min(minx, n.x); });
@@ -324,7 +308,7 @@
       commit(); render(false);
     }
     var cnt = 0;
-    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO, freePoints: true, fitSide: 215, stub: 30, lanes: 30,
+    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO, freePoints: true, fitSide: 215, stub: 24,
       onMove: function (list) { list.forEach(function (m) { var n = nodeById(m.id); if (n) { n.x = m.x; n.y = m.y; } }); commit(); },
       onAdd: function (p) { addNode('process', p.x, p.y, true); },
       onConnect: function (a, b, pa, pb, fa, ta) { addEdge(a.id, b.id, fa, ta); },
