@@ -4,6 +4,7 @@ import re, collections
 from wtests import all_tests
 from wmap import topic, TOPICS, SHIP
 import wcode
+from wdeep import deepen
 
 AREAS_FOR = {'catalog': ('کاتالوگ و فروشندگان', None), 'order': ('سفارش و پرداخت', None), 'infra': ('زیرساخت و گسترش', None)}
 NEW_AREAS = {
@@ -93,6 +94,7 @@ def attach(doc, by_title, areas):
                 _put(dst, v['tests'], kind, fname, ui)
                 total += len(v['tests'])
         enrich(m if tgt.startswith('+') else node, tgt, ui)
+        if tgt.startswith('+'): deepen(m, tgt)
     return total
 
 

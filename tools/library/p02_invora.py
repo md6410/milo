@@ -3,6 +3,7 @@
 from dsl import Doc
 from proj import load, place, finish_area
 from itests import tests as invora_tests
+import icode
 
 NAME = 'Invora — دفترِ فاکتور'
 SUMMARY = ('برنامهٔ صدورِ فاکتور/پیش‌فاکتور/فاکتورِ رسمی (نسخهٔ وب و آفلاین) به‌شکل یک پروژهٔ Milo: '
@@ -138,4 +139,39 @@ def build():
             node.add_test(t['title'], port=t.get('port', ''), state=t.get('state', ''), given=t['given'], expect=t['expect'], kind=t['kind'], expect_kind=t['expect_kind'], ref=t.get('ref', ''), source=t['source'])
             cnt += 1
     print('   تست‌های Invora:', cnt)
+
+    # ===== ساختار فنی و رابط کاربری از کدِ Invora + تست‌های رابط
+    UIT = {
+        'فاکتورساز (پیش‌فاکتور، فاکتور، فاکتور رسمی)': [
+            ('ارقامِ دیدنی فارسی می‌شوند', 'faTxt("مبلغ 1250 ریال")', 'مبلغ ۱۲۵۰ ریال'),
+            ('عددِ چسبیده به حرفِ لاتین/نشانی دست نمی‌خورد', 'faTxt("www.example1.ir") و faTxt("کد A12 و 3.5")', 'www.example1.ir ؛ کد A12 و ۳٫۵'),
+            ('جداکنندهٔ هزارگان فارسی', 'faTxt("1,250,000")', '۱٬۲۵۰٬۰۰۰'),
+            ('نمایشِ مبلغ با رقمِ فارسی/لاتین', 'fmtMoney(1234567,"IRR",true) و (…,false)', '۱٬۲۳۴٬۵۶۷ ؛ 1,234,567'),
+            ('سند روی یک برگِ A4 جا می‌شود یا به چند برگ می‌شکند', 'سندِ بلند با ۶۰ ردیف', 'چند برگ با «ادامه در صفحهٔ بعد» و جمعِ نقل‌شده؛ ارتفاعِ هر برگ ≤ ۲۹۳٫۵ میلی‌متر'),
+            ('پیش‌نمایش با عرضِ کادر مقیاس می‌شود', 'تغییرِ عرضِ پنجره', 'پیش‌نمایش بدونِ اسکرولِ افقی کوچک/بزرگ می‌شود'),
+            ('قفلِ سندِ ثبت‌شده در رابط', 'بازکردنِ فاکتورِ committed', 'فیلدها غیرفعال و نشانِ قفل؛ «بازکردن» برای ویرایش'),
+        ],
+        'ورودِ بی‌رمز (OTP، Passkey، کپچا)': [
+            ('کپچا فقط پس از سه بار ارسال نشان داده می‌شود', 'ارسالِ کدِ ۱ تا ۳', 'بدونِ کپچا؛ بارِ چهارم: تصویرِ کپچا'),
+            ('پیامِ خطای ورود فارسی و بدونِ افشای دلیل', 'رمزِ اشتباه', 'پیامِ عمومی، نه «کاربر وجود ندارد»'),
+        ],
+        'لینکِ دانلودِ رمزدار و تأییدِ اصالتِ سند': [
+            ('صفحهٔ دریافت قبل از رمز عنوانِ عمومی دارد', 'GET d.php?t=…', 'عنوان «دریافت فایل»؛ نه نامِ سند'),
+            ('پیامِ لینکِ غیرفعال', 'لینکِ locked/revoked', 'متنِ DEAD_MSG مربوط'),
+        ],
+    }
+    ucnt = 0
+    for title, (tt, uu) in ((t, icode.tech_ui(t)) for t in icode.MAP):
+        node = by_title.get(title)
+        if not node: continue
+        if tt:
+            top = node.section('ساختار فنی (توابع و فایل‌های داده)', icon='🧱', summary='تابع‌های app.html و PHP و فایل‌های دادهٔ JSON سرور — از کدِ Invora', details='نام و امضای تابع‌ها از کد استخراج شده؛ داده‌ها رمزشده روی سرور (data/*.json) یا در مرورگر ذخیره می‌شوند.')
+            for a, b, c in tt: top.section(a, icon='📄', summary=b, details=c)
+        if uu or title in UIT:
+            top = node.section('رابط کاربری', icon='🖥️', summary='عنصرهای رابط (سرتیتر، دکمه، برچسب، ستون، پیام) هر تابعِ رندر/صفحه + تست‌های رابط', details='برنامه فارسی/راست‌به‌چپ و با ارقامِ فارسی است؛ همهٔ رابط در app.html (آفلاین و وب مشترک) و صفحه‌های عمومیِ PHP (d.php، v.php، index.php).')
+            for a, b, c in uu: top.section(a, icon='📱', summary=b, details=c)
+            for i, (tl, gv, ex) in enumerate(UIT.get(title, []), 1):
+                top.add_test(tl, given=gv, expect=ex, kind='e2e', ref='UI-%s-%02d' % (title[:3], i), source='app.html (اجرای واقعی)' if 'fa' in gv or 'fmt' in gv else 'مستندِ کد/README')
+                ucnt += 1
+    print('   تست‌های رابطِ Invora:', ucnt)
     return d, SLUG, TITLE

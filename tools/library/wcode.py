@@ -225,3 +225,26 @@ if __name__ == '__main__':
     ix = index()
     for tg, d in sorted(ix.items(), key=lambda x: -len(x[1]['libs'])):
         print('%-50s pages=%3d libs=%3d funcs=%4d tables=%3d' % (tg[:50], len(d['pages']), len(d['libs']), sum(len(f) for _, f in d['libs']), len(d['tables'])))
+
+
+# ---------------------------------------------------------------- سرفصلِ فایل‌ها (روایتِ طراحی)
+def header(rel, n=5000):
+    src = _read(os.path.join(REPO, rel))
+    m = re.search(r'<\?php\s*(?:declare\([^)]*\);\s*)?/\*+(.*?)\*/', src, re.S)
+    if not m: return ''
+    lines = [re.sub(r'^[\s*=\-]+', '', l).rstrip() for l in m.group(1).splitlines()]
+    lines = [l for l in lines if l.strip() and not re.match(r'^[-=_\s]+$', l)]
+    return '\n'.join(lines)[:n]
+
+
+def flows(tg, limit=10):
+    """برای هر فایلِ کتابخانه‌ایِ ماژول: (عنوان، سرفصل، فهرستِ تابع‌های مهم، پارامترهای تابعِ اول). فقط فایل‌هایی با سرفصلِ فارسی."""
+    d = index().get(tg)
+    if not d: return []
+    out = []
+    for rel, fn in d['libs']:
+        h = header(rel)
+        if not FA.search(h): continue
+        out.append((rel, h, fn))
+    out.sort(key=lambda x: -len(x[2]))
+    return out[:limit]
