@@ -2,7 +2,7 @@
 (function () {
 'use strict';
 var J = window.JAL, E = window.ENG;
-var S = { user: null, csrf: '', needsSetup: false, projects: [], pid: 0, P: null, idx: null, sch: null,
+var S = { version: '', updAvail: false, user: null, csrf: '', needsSetup: false, projects: [], pid: 0, P: null, idx: null, sch: null,
   tab: 'dash', focus: 0, sel: 0, open: {}, zoom: 'week', crit: true, logNode: '', logKind: '' };
 var FA = J.fa;
 var ZOOM = { day: 26, week: 11, month: 4, quarter: 1.6 };
@@ -69,7 +69,7 @@ function jdVal(f, name) { var i = $('[name=' + name + ']', f); return i ? J.pars
 /* ---------- بارگذاری ---------- */
 function loadMe() {
   return fetch('api.php?a=me', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
-    S.user = j.user; S.csrf = j.csrf; S.needsSetup = j.needs_setup;
+    S.user = j.user; S.csrf = j.csrf; S.needsSetup = j.needs_setup; S.version = j.version || '';
   });
 }
 function loadProjects() { return api('projects').then(function (j) { S.projects = j.projects; }); }
@@ -115,7 +115,7 @@ function topBar() {
   var p = S.P.project;
   return '<header class="top"><button class="btn ghost" data-act="home">→ پروژه‌ها</button><h1>' + esc(p.name) + '</h1>' +
     '<span class="pill">' + FA(p.progress) + '٪</span><span class="sp"></span>' +
-    '<button class="btn sm" data-act="editproject">تنظیمات پروژه</button></header>';
+    '<button class="btn sm" data-act="update">به‌روزرسانی' + (S.updAvail ? ' <span class="dot" style="background:var(--bad)"></span>' : '') + ' <span class="mut">v' + esc(S.version) + '</span></button>' + '<button class="btn sm" data-act="editproject">تنظیمات پروژه</button></header>';
 }
 var TABS = [['dash', 'داشبورد'], ['map', 'نقشهٔ ساختار'], ['outline', 'فهرست و ویرایش'], ['plan', 'ترتیب و زمان‌بندی'], ['gantt', 'تایم‌لاین'], ['logs', 'گزارش‌ها'], ['ai', 'هوش مصنوعی و خروجی']];
 function tabsBar() {
@@ -147,6 +147,10 @@ function authView() {
 }
 
 /* ---------- خانه ---------- */
+function homeTop() {
+  return '<header class="top"><h1>مدیر پروژه</h1><span class="sp"></span><span class="mut sm">' + esc(S.user) + '</span>' + '<button class="btn sm" data-act="update">به‌روزرسانی' + (S.updAvail ? ' <span class="dot" style="background:var(--bad)"></span>' : '') + ' <span class="mut">v' + esc(S.version) + '</span></button>' +
+    '<button class="btn sm" data-act="passwd">تغییر رمز</button><button class="btn sm" data-act="logout">خروج</button></header>';
+}
 function homeView() {
   var cards = S.projects.map(function (p) {
     return '<div class="card pcard" data-act="open" data-id="' + p.id + '"><h3>' + esc(p.name) + '</h3>' +
@@ -155,8 +159,7 @@ function homeView() {
       '<div class="row sm mut"><span>' + FA(p.node_count) + ' بخش</span><span>·</span><span>' + FA(p.leaf_done) + '/' + FA(p.leaf_count) + ' کار انجام‌شده</span>' +
       (p.target_date ? '<span>·</span><span>هدف: ' + J.fmt(p.target_date) + '</span>' : '') + '</div></div>';
   }).join('');
-  return '<header class="top"><h1>مدیر پروژه</h1><span class="sp"></span><span class="mut sm">' + esc(S.user) + '</span>' +
-    '<button class="btn sm" data-act="passwd">تغییر رمز</button><button class="btn sm" data-act="logout">خروج</button></header>' +
+  return homeTop() +
     '<div class="wrap"><div class="row" style="margin-bottom:14px"><h2 class="sec grow" style="margin:0">پروژه‌ها</h2>' +
     '<button class="btn" data-act="sample">پروژهٔ نمونه</button><button class="btn" data-act="importnew">ایمپورت از فایل…</button>' +
     '<button class="btn pri" data-act="newproject">+ پروژهٔ جدید</button></div>' +
@@ -679,10 +682,48 @@ function sampleDoc() {
     milestones: [{ title: 'نسخهٔ آزمایشی', date: J.dayToIso(J.today() + 40) }, { title: 'انتشار', date: J.dayToIso(J.today() + 75) }] };
 }
 
+
+/* ---------- به‌روزرسانی از گیت‌هاب ---------- */
+function updDialog(u) {
+  var inst = u.installed, lat = u.latest, hist = (u.history || []).slice(0, 5).map(function (h) {
+    return '<div class="sm ' + (h.ok ? '' : 'crit') + '">' + (h.ok ? '✓' : '✗') + ' ' + new Date(h.at).toLocaleString('fa-IR') + ' — ' + esc(h.version || '') + (h.error ? ' — ' + esc(h.error) : '') + '</div>';
+  }).join('');
+  var body = '<p>نسخهٔ نصب‌شده: <b class="ltr">' + esc(inst.version) + '</b>' + (inst.at ? ' <span class="mut sm">(' + new Date(inst.at).toLocaleDateString('fa-IR') + ')</span>' : '') + '</p>' +
+    '<p>آخرین نسخه در گیت‌هاب: <b class="ltr">' + esc(lat.version || '—') + '</b> ' + (u.available ? '<span class="pill s st-doing">نسخهٔ تازه آماده است</span>' : (lat.sha ? '<span class="pill s st-done">به‌روز هستید</span>' : '')) +
+    (lat.msg ? '<div class="mut sm">' + esc(lat.msg) + '</div>' : '') + '</p>' +
+    (u.lastError ? '<p class="crit sm">' + esc(u.lastError) + '</p>' : '') +
+    (u.zip ? '' : '<p class="crit sm">افزونهٔ zip در PHP فعال نیست؛ نصب خودکار کار نمی‌کند.</p>') +
+    '<div class="row"><button type="button" class="btn" data-up="check">بررسی همین حالا</button><button type="button" class="btn pri" data-up="apply"' + (u.available ? '' : ' disabled') + '>نصبِ نسخهٔ تازه</button></div>' +
+    '<hr style="border:0;border-top:1px solid var(--line);margin:14px 0"><label class="row"><input type="checkbox" name="auto"' + (u.auto ? ' checked' : '') + '> نصبِ خودکارِ نسخهٔ تازه</label>' +
+    '<label class="f" style="margin-top:8px"><span>هر چند دقیقه بررسی شود</span><input type="number" min="2" name="every" value="' + u.every + '" style="width:100px"></label>' +
+    (hist ? '<h2 class="sec">تاریخچه</h2>' + hist : '') + '<p class="mut sm">منبع: github.com/' + esc(u.repo) + ' (شاخهٔ main). پیش از نصب نحوِ فایل‌ها سنجیده و پشتیبان گرفته می‌شود؛ اگر سایت بالا نیامد نسخهٔ قبل برمی‌گردد. پوشهٔ data هرگز دست نمی‌خورد.</p>';
+  modal({ title: 'به‌روزرسانی Milo', body: body, ok: 'ذخیرهٔ تنظیمات', noFocus: true,
+    setup: function (f, close) {
+      $$('[data-up]', f).forEach(function (b) { b.addEventListener('click', guard(function () {
+        b.disabled = true; var act = b.getAttribute('data-up');
+        return api(act === 'apply' ? 'update_apply' : 'update_check', {}).then(function (j) {
+          S.updAvail = !!j.upd.available; close();
+          if (act === 'apply' && j.r.updated) { toast('نسخهٔ ' + j.r.version + ' نصب شد؛ صفحه تازه می‌شود…'); setTimeout(function () { location.reload(); }, 1500); }
+          else { toast(j.upd.available ? 'نسخهٔ تازه‌ای هست' : 'به‌روز هستید'); render(true); }
+        }).catch(function (e) { b.disabled = false; fail(e); });
+      })); });
+    },
+    onok: function (f) { return api('update_cfg', { auto: $('[name=auto]', f).checked, every: +$('[name=every]', f).value }).then(function () { toast('ذخیره شد'); }); } });
+}
+function updTick() {
+  if (!S.user) return;
+  api('update_tick', {}).then(function (j) {
+    S.updAvail = !!j.upd.available;
+    if (j.r && j.r.updated) { toast('Milo به نسخهٔ ' + j.r.version + ' به‌روز شد؛ صفحه تازه می‌شود…'); setTimeout(function () { location.reload(); }, 1800); }
+    else { var t = $('.top'); if (t) t.outerHTML = S.P ? topBar() : homeTop(); }
+  }).catch(function () {});
+}
+
 /* ---------- رویدادها ---------- */
 function elId(el) { return +el.getAttribute('data-id'); }
 var ACTS = {
   noop: function () {},
+  update: function () { return api('update_status').then(function (j) { updDialog(j.upd); }); },
   home: function () { location.hash = '#/'; },
   open: function (el) { location.hash = '#/p/' + elId(el) + '/dash'; },
   tab: function (el) { go(el.getAttribute('data-v')); },
@@ -789,5 +830,5 @@ document.addEventListener('paste', function (e) {
   inp.files = dt.files; toast(FA(imgs.length) + ' تصویر به پیوست افزوده شد');
 });
 window.addEventListener('hashchange', route);
-loadMe().then(route).catch(function (e) { $('#app').innerHTML = '<div class="boot">خطا در اتصال به سرور: ' + esc(e.message) + '</div>'; });
+loadMe().then(function () { route(); setTimeout(updTick, 3000); setInterval(updTick, 10 * 60 * 1000); }).catch(function (e) { $('#app').innerHTML = '<div class="boot">خطا در اتصال به سرور: ' + esc(e.message) + '</div>'; });
 })();

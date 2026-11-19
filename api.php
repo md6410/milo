@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/inc/db.php';
 require __DIR__ . '/inc/import.php';
+require __DIR__ . '/inc/update.php';
 
 ini_set('display_errors', '0');
 session_name('pmsid');
@@ -38,7 +39,7 @@ try {
 
     // ---- احراز هویت
     if ($a === 'me') {
-        out(['user' => $_SESSION['user'] ?? null, 'csrf' => $_SESSION['csrf'], 'needs_setup' => $users === 0]);
+        out(['user' => $_SESSION['user'] ?? null, 'csrf' => $_SESSION['csrf'], 'needs_setup' => $users === 0, 'version' => pm_version()]);
     }
     if ($isPost && ($a === 'setup' || $a === 'login')) {
         if (!hash_equals($_SESSION['csrf'], (string)($_SERVER['HTTP_X_CSRF'] ?? ''))) fail('نشست منقضی شد؛ صفحه را تازه کنید', 403);
@@ -90,6 +91,24 @@ try {
             if (mb_strlen($pw) < 6) fail('رمز حداقل ۶ نویسه باشد');
             $db->prepare('UPDATE users SET pass_hash=? WHERE username=?')->execute([password_hash($pw, PASSWORD_DEFAULT), $author]);
             out(['ok' => true]);
+
+        // ---- به‌روزرسانی از گیت‌هاب
+        case 'update_status':
+            out(['ok' => true, 'upd' => pm_upd_status()]);
+        case 'update_tick':      // صفحهٔ باز هر چند دقیقه صدا می‌زند؛ اگر خودکار روشن باشد نصب می‌کند
+            session_write_close();
+            $r = pm_upd_run(false, (bool)pm_upd_state()['auto'], 'auto');
+            out(['ok' => true, 'r' => $r, 'upd' => pm_upd_status()]);
+        case 'update_check':
+        case 'update_apply':
+            session_write_close();
+            $r = pm_upd_run(true, $a === 'update_apply', $author);
+            out(['ok' => empty($r['error']), 'error' => $r['error'] ?? '', 'r' => $r, 'upd' => pm_upd_status()], empty($r['error']) ? 200 : 502);
+        case 'update_cfg':
+            $every = max(2, min(1440, (int)($in['every'] ?? 10)));
+            $auto = !empty($in['auto']);
+            pm_jupdate('update.json', function (array &$s) use ($auto, $every) { $s['auto'] = $auto; $s['every'] = $every; });
+            out(['ok' => true, 'upd' => pm_upd_status()]);
 
         // ---- پروژه‌ها
         case 'projects':

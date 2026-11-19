@@ -1,0 +1,13 @@
+# فایل‌هایی که روی هاست نصب می‌شوند — به‌روزرسانی خودکار از گیت‌هاب فقط همین‌ها را جایگزین می‌کند.
+# مسیر حداکثر یک پوشه عمق؛ هرگز data/ یا فایل‌های تنظیمات.
+.htaccess
+index.php
+api.php
+inc/db.php
+inc/import.php
+inc/update.php
+inc/version.php
+assets/app.css
+assets/app.js
+assets/engine.js
+assets/jalali.js

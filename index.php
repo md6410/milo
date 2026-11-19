@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+/* سنجش سلامت برای به‌روزرسانِ خودکار */
+if (isset($_GET['health'])) { header('Content-Type: text/plain'); echo 'ok'; exit; }
 header('Cache-Control: no-cache');
 header("Content-Security-Policy: default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'self'");
 $v = fn(string $f) => (string)@filemtime(__DIR__ . '/assets/' . $f);
