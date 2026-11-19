@@ -8,7 +8,7 @@ OUT = os.path.join(os.path.dirname(__file__), '..', '..', 'library')
 os.makedirs(OUT, exist_ok=True)
 only = sys.argv[1:]
 total = 0
-for f in sorted(glob.glob(os.path.join(os.path.dirname(__file__), 'm*.py'))):
+for f in sorted(glob.glob(os.path.join(os.path.dirname(__file__), 'm[0-9]*.py'))) + sorted(glob.glob(os.path.join(os.path.dirname(__file__), 'p[0-9]*.py'))):
     name = os.path.basename(f)[:-3]
     if only and not any(o in name for o in only):
         continue
@@ -17,7 +17,7 @@ for f in sorted(glob.glob(os.path.join(os.path.dirname(__file__), 'm*.py'))):
     spec.loader.exec_module(mod)
     items = mod.builds() if hasattr(mod, 'builds') else [mod.build()]
     for doc, slug, title in items:
-        data = dsl.export(doc, slug, title)
+        data = dsl.export_project(doc, slug, title, mod.SUMMARY, mod.NAME) if hasattr(mod, 'SUMMARY') else dsl.export(doc, slug, title)
         dsl.dump(data, os.path.join(OUT, slug + '.pm.json'))
         kinds = {}
         for n in data['nodes']:
@@ -25,3 +25,14 @@ for f in sorted(glob.glob(os.path.join(os.path.dirname(__file__), 'm*.py'))):
         print('%-28s %s  گره‌ها=%d پیوندها=%d' % (slug, kinds, len(data['nodes']), len(data['dependencies'])))
         total += 1
 print('ماژول‌ها:', total)
+
+# --- فهرستِ نصب: library/*.pm.json در deploy-files.txt (بخشِ خودکار)
+dep = os.path.join(os.path.dirname(__file__), '..', '..', 'deploy-files.txt')
+txt = open(dep, encoding='utf-8').read()
+a, b = '# --- library (خودکار: python3 tools/library/build.py)\n', '# --- /library\n'
+if a in txt:
+    txt = txt[:txt.index(a)] + txt[txt.index(b) + len(b):]
+names = sorted(f for f in os.listdir(OUT) if f.endswith('.pm.json'))
+txt = txt.rstrip('\n') + '\n' + a + ''.join('library/%s\n' % n for n in names) + b
+open(dep, 'w', encoding='utf-8').write(txt)
+print('deploy-files.txt:', len(names), 'فایل library')

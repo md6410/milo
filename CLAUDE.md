@@ -13,3 +13,6 @@
 - Hierarchy (enforced in `inc/db.php` `pm_child_kinds`, mirrored in `assets/app.js` `childKindsOf`): root → area; area → section, module;
   section/module → section, module, task; task → nothing and has exactly one input/output. Change both places together.
 - Every mutating UI action must be gated by `S.editing` (see `MUT` in `app.js`); the DB migrations live in `pm_schema` (bump `user_version`).
+
+- `library/*.pm.json` is generated: edit `tools/library/*.py`, run `python3 tools/library/build.py` (also rewrites the auto section of `deploy-files.txt`)
+  and `node tools/library/check.js library/*.pm.json` (must report no unused ports). API: `bundled_catalog` / `bundled_import`.

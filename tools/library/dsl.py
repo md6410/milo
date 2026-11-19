@@ -82,9 +82,32 @@ class Node:
     def fout_(self, child, port, label=''):
         self._need(self.outs, port); self.fout.append((child, port, label))
 
-    def link(self, a, out, b, inn, label=''):
+    def link(self, a, out, b, inn, label='', two=False):
         self._need(a.outs, out); self._need(b.ins, inn)
-        self.links.append((a, out, b, inn, label))
+        self.links.append((a, out, b, inn, label, two))
+        if not b.ins[[p['name'] for p in b.ins].index(inn)].get('use'):
+            b.ins[[p['name'] for p in b.ins].index(inn)]['use'] = 'از «%s»%s' % (a.title, (': ' + label) if label else '')
+        if not a.outs[[p['name'] for p in a.outs].index(out)].get('use'):
+            a.outs[[p['name'] for p in a.outs].index(out)]['use'] = 'به «%s»%s' % (b.title, (': ' + label) if label else '')
+
+    # ---- ویژهٔ پروژه: درگاه‌های بخشِ کلی
+    def expose_in(self, name, desc, targets, use=''):
+        """ورودیِ بخش‌کلی که به چند ماژولِ درونش (ماژول, نامِ پورت) می‌رسد."""
+        if not any(p['name'] == name for p in self.ins):
+            self.ins.append(P(name, desc, use))
+        for m, port in targets:
+            self.bnd_in(name, m, port)
+            pi = m.ins[[p['name'] for p in m.ins].index(port)]
+            if not pi.get('use'):
+                pi['use'] = 'از بیرونِ این بخش: «%s»' % name
+
+    def expose_out(self, name, desc, source, port, use=''):
+        if not any(p['name'] == name for p in self.outs):
+            self.outs.append(P(name, desc, use))
+        self.bnd_out(source, port, name)
+        po = source.outs[[p['name'] for p in source.outs].index(port)]
+        if not po.get('use'):
+            po['use'] = 'به بیرونِ این بخش: «%s»' % name
 
     def _need(self, lst, name):
         assert any(p['name'] == name for p in lst), 'پورت «%s» در «%s» تعریف نشده' % (name, self.title)
@@ -95,6 +118,11 @@ class Doc:
         self.prefix = prefix
         self.n = 0
         self.nodes = []
+        self.links = []   # وابستگیِ بینِ بخش‌های‌کلی (سطحِ پروژه)
+
+    def link(self, a, out, b, inn, label='', two=False):
+        a._need(a.outs, out); b._need(b.ins, inn)
+        self.links.append((a, out, b, inn, label, two))
 
     def module(self, title, **kw):
         return Node(self, None, 'module', title, **kw)
@@ -181,7 +209,7 @@ def container_flow(c):
     # لایه‌بندیِ زیرمجموعه‌ها بر پایهٔ link ها
     layer = {k.id: 0 for k in kids}
     for _ in range(len(kids) + 1):
-        for a, o, b, i, l in c.links:
+        for a, o, b, i, l, tw in c.links:
             layer[b.id] = max(layer[b.id], layer[a.id] + 1)
     cols = {}
     for k in kids:
@@ -200,7 +228,7 @@ def container_flow(c):
         out_ids[p['name']] = add('io', p['name'], cx + (maxl + 1) * 300, r * 100 + 10, port={'side': 'out', 'name': p['name']}, w=190)
     for port, child, cp in c.bin:
         edge(inp_ids[port], ids[child.id], cp if cp != port else '')
-    for a, o, b, i, l in c.links:
+    for a, o, b, i, l, tw in c.links:
         edge(ids[a.id], ids[b.id], l or (o if o == i else o + ' ← ' + i))
     for child, cp, port in c.bout:
         edge(ids[child.id], out_ids[port], cp if cp != port else '')
@@ -235,8 +263,17 @@ def export(doc, slug, title):
             deps.append({'from': n.id, 'to': child.id, 'bnd': 'in', 'out': port, 'in': cp, 'label': ''})
         for child, cp, port in n.bout:
             deps.append({'from': child.id, 'to': n.id, 'bnd': 'out', 'out': cp, 'in': port, 'label': ''})
-        for a, o, b, i, l in n.links:
-            deps.append({'from': a.id, 'to': b.id, 'out': o, 'in': i, 'label': l})
+        for a, o, b, i, l, tw in n.links:
+            d = {'from': a.id, 'to': b.id, 'out': o, 'in': i, 'label': l}
+            if tw:
+                d['two'] = True
+            deps.append(d)
+    for a, o, b, i, l, tw in doc.links:
+        d = {'from': a.id, 'to': b.id, 'out': o, 'in': i, 'label': l}
+        if tw:
+            d['two'] = True
+        deps.append(d)
+    deps.sort(key=lambda d: 1 if d.get('two') else 0)   # وابستگی‌های دوطرفه آخر تا بررسیِ دور را نشکنند
     root = doc.nodes[0]
     return {'schema': 'weby-projectmanager/1', 'library_module': {'slug': slug, 'title': title, 'version': 1},
             'project': {'name': 'کتابخانهٔ ماژول‌ها'}, 'nodes': nodes, 'dependencies': deps, 'milestones': [], 'logs': [], 'work_report': []}
@@ -244,7 +281,7 @@ def export(doc, slug, title):
 
 def dump(doc_json, path):
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump(doc_json, f, ensure_ascii=False, indent=1)
+        json.dump(doc_json, f, ensure_ascii=False, separators=(',', ':'))
 
 
 def use(node, notes):
@@ -341,3 +378,12 @@ def chain_module(doc, parent, title, icon, color, summary, ins, outs, sections, 
     if notes:
         use(m, notes)
     return m
+
+
+def export_project(doc, slug, title, summary, name=None):
+    """همان export ولی برای پروژهٔ آماده (bundled_project) نه ماژولِ کتابخانه."""
+    data = export(doc, slug, title)
+    data.pop('library_module', None)
+    data['bundled_project'] = {'slug': slug, 'title': title, 'summary': summary, 'version': 1}
+    data['project'] = {'name': name or title}
+    return data

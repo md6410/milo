@@ -13,3 +13,36 @@ assets/canvas.js
 assets/flow.js
 assets/engine.js
 assets/jalali.js
+# --- library (خودکار: python3 tools/library/build.py)
+library/auth-otp-passkey.pm.json
+library/batch-issue.pm.json
+library/calendar-fx.pm.json
+library/encrypted-vault.pm.json
+library/extension-engine.pm.json
+library/github-updater.pm.json
+library/invoice-builder.pm.json
+library/label-maker.pm.json
+library/neshan-map.pm.json
+library/order-checkout.pm.json
+library/p-invora.pm.json
+library/p-weby.pm.json
+library/partner-accounting.pm.json
+library/pay-cod.pm.json
+library/pay-core.pm.json
+library/pay-digipay.pm.json
+library/pay-jibit.pm.json
+library/pay-mellat.pm.json
+library/pay-saman.pm.json
+library/pay-snapppay.pm.json
+library/pay-zarinpal.pm.json
+library/print-station.pm.json
+library/product.pm.json
+library/qr-barcode-scan.pm.json
+library/sales-partner.pm.json
+library/secure-share.pm.json
+library/seller.pm.json
+library/shipping-desk.pm.json
+library/sms-ir.pm.json
+library/torob.pm.json
+library/warehouse.pm.json
+# --- /library

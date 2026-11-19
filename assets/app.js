@@ -217,7 +217,7 @@ function menuBar() {
   var p = S.P, inP = !!p, ed = S.editing, nsel = inP && S.sel && S.idx.byId.get(S.sel), selMod = nsel && nsel.kind === 'module';
   var m = '';
   m += menu('file', '📁', 'پروژه',
-    mi('🆕', 'پروژهٔ جدید…', 'newproject') + mi('📂', 'فهرستِ پروژه‌ها', 'home') + mi('📥', 'ایمپورت از فایل…', 'importnew') + mi('🎬', 'پروژهٔ دمو (همهٔ امکانات)', 'sample') +
+    mi('🆕', 'پروژهٔ جدید…', 'newproject') + mi('📂', 'فهرستِ پروژه‌ها', 'home') + mi('📥', 'ایمپورت از فایل…', 'importnew') + mi('🎬', 'پروژهٔ دمو (همهٔ امکانات)', 'sample') + mi('📦', 'نمونه‌ها و ماژول‌های آماده…', 'bundled') +
     (inP ? menuSep() + mi('⚙️', 'تنظیمات پروژه…', 'editproject', { dis: !ed && false }) + mi('🤖', 'خروجی برای هوش مصنوعی (.pm.json)', 'exportjson') + mi('📄', 'شرحِ خوانا (Markdown)', 'exportmd') + mi('🗜️', 'پیوست‌ها (zip)', 'exportzip') : ''), '#2f6fed');
   if (inP) m += menu('edit', '✏️', 'ویرایش',
     mi('✎', 'شروعِ ویرایش', 'editstart', { dis: ed, key: 'Ctrl+E' }) + mi('💾', 'ذخیره و پایانِ ویرایش', 'editsave', { dis: !ed, key: 'Ctrl+S' }) + mi('↩', 'لغوِ تغییراتِ این نوبت', 'editdiscard', { dis: !ed }) +
@@ -291,7 +291,7 @@ function homeView() {
   }).join('');
   return menuBar() + '<div class="wrap"><div class="card libcard" data-act="openlib"><span class="lc-i">📚</span><div class="grow"><h3>کتابخانهٔ ماژول‌ها</h3><div class="mut sm">ماژول‌هایی که یک‌بار تعریف می‌کنید و در همهٔ پروژه‌ها (با امکانِ ارث‌بری و تغییر) به کار می‌برید. ' + FA(S.libCount || 0) + ' ماژول</div></div><span class="btn">باز کردن ←</span></div>' +
     '<div class="row" style="margin:14px 0"><h2 class="sec grow" style="margin:0">🗂️ پروژه‌ها</h2>' +
-    '<button class="btn" data-act="sample">🎬 پروژهٔ دمو (همهٔ امکانات)</button><button class="btn" data-act="importnew">📥 ایمپورت از فایل…</button>' +
+    '<button class="btn" data-act="sample">🎬 پروژهٔ دمو (همهٔ امکانات)</button><button class="btn" data-act="bundled">📦 نمونه‌ها و ماژول‌های آماده</button><button class="btn" data-act="importnew">📥 ایمپورت از فایل…</button>' +
     '<button class="btn pri" data-act="newproject">🆕 پروژهٔ جدید</button></div>' +
     (cards ? '<div class="grid">' + cards + '</div>' : '<div class="card empty">هنوز پروژه‌ای ندارید.<br>با «پروژهٔ جدید» شروع کنید یا «پروژهٔ دمو» را ببینید.</div>') + '</div><footer id="statusbar" class="statusbar"></footer>';
 }
@@ -718,6 +718,41 @@ function taskPage(n) {
 
 /* ---------- کتابخانهٔ ماژول‌ها ---------- */
 function openLibrary() { return api('library').then(function (r) { location.hash = '#/p/' + r.id + '/map'; }); }
+function bundledDialog() {
+  return api('bundled_catalog').then(function (j) {
+    function row(x, kind) {
+      return '<label class="libr bf"><input type="checkbox" data-bf="' + esc(x.file) + '"' + (x.installed ? '' : ' checked') + '><span class="libr-i">' + esc(x.icon || (kind === 'p' ? '🗺️' : '🧩')) + '</span><div class="grow"><b>' + esc(x.title) + '</b>' +
+        (x.installed ? ' <span class="pill">قبلاً افزوده شده</span>' : '') + '<div class="mut sm">' + esc(x.summary || '') + '</div>' +
+        '<div class="sm mut">' + FA(x.nodes) + ' گره' + (kind === 'm' ? ' · ⇢ ' + FA(x.inputs) + ' ورودی · ' + FA(x.outputs) + ' خروجی' : '') + '</div></div></label>';
+    }
+    var body = '';
+    if (j.projects.length) body += '<h4 style="margin:6px 0">🗺️ پروژه‌های آماده (از همین ماژول‌ها ساخته شده‌اند)</h4><div class="liblist">' + j.projects.map(function (x) { return row(x, 'p'); }).join('') + '</div>';
+    if (j.modules.length) body += '<h4 style="margin:12px 0 6px">📚 ماژول‌های آمادهٔ کتابخانه</h4><div class="row" style="margin-bottom:6px"><button type="button" class="btn sm" data-all="1">انتخابِ همه</button><button type="button" class="btn sm" data-all="0">هیچ‌کدام</button></div><div class="liblist">' + j.modules.map(function (x) { return row(x, 'm'); }).join('') + '</div>';
+    if (!body) body = '<div class="empty">فایلِ آماده‌ای همراهِ برنامه نیست.</div>';
+    body += '<p class="mut sm">ماژول‌ها وارد «کتابخانهٔ ماژول‌ها» می‌شوند (موارد تکراری رد می‌شوند)؛ هر پروژهٔ آماده یک پروژهٔ تازه می‌سازد. می‌توانید بعداً هر ماژول را در پروژهٔ خودتان درج کنید.</p>';
+    return modal({ title: '📦 نمونه‌ها و ماژول‌های آماده', cls: 'wide', ok: 'افزودنِ انتخاب‌شده‌ها', body: body,
+      setup: function (f) {
+        $$('[data-all]', f).forEach(function (b) {
+          b.addEventListener('click', function () {
+            var on = b.getAttribute('data-all') === '1';
+            $$('[data-bf]', f).forEach(function (c) { if (c.getAttribute('data-bf').indexOf('p-') !== 0) c.checked = on; });
+          });
+        });
+      },
+      onok: function (f) {
+        var files = $$('[data-bf]', f).filter(function (c) { return c.checked; }).map(function (c) { return c.getAttribute('data-bf'); });
+        if (!files.length) { toast('چیزی انتخاب نشده', true); return false; }
+        toast('در حالِ افزودن…');
+        return api('bundled_import', { files: files }).then(function (r) {
+          toast(FA(r.modules) + ' ماژول و ' + FA(r.projects) + ' پروژه افزوده شد' + (r.skipped ? ' (' + FA(r.skipped) + ' تکراری رد شد)' : ''));
+          return Promise.all([loadProjects(), api('library_list')]).then(function (a) {
+            S.libCount = a[1].modules.length; S.libId = a[1].library_id;
+            if (r.project_ids && r.project_ids.length) { S.pid = 0; S.P = null; location.hash = '#/p/' + r.project_ids[0] + '/map'; route(); } else render();
+          });
+        });
+      } });
+  });
+}
 function libPicker(onPick) {
   return api('library_list').then(function (j) {
     var rows = j.modules.map(function (m) {
@@ -1433,6 +1468,7 @@ var ACTS = {
       setup: function (f, close) { $('[data-del]', f).addEventListener('click', guard(function () { if (!confirm('پروژه «' + p.name + '» با همهٔ بخش‌ها، گزارش‌ها و پیوست‌ها برای همیشه پاک شود؟')) return; return api('project_delete', { project_id: S.pid }).then(function () { close(); S.P = null; S.pid = 0; location.hash = '#/'; }); })); },
       onok: function (f) { return saveProjectForm(f, S.pid).then(reload); } });
   },
+  bundled: function () { return bundledDialog(); },
   sample: function () { toast('در حالِ ساختنِ دمو…'); return runSample().then(function (pid) { S.pid = 0; S.P = null; location.hash = '#/p/' + pid + '/map'; route(); }); },
   importnew: function () { var i = document.createElement('input'); i.type = 'file'; i.accept = '.json'; i.onchange = function () { if (i.files[0]) readImport(i.files[0], 0); }; i.click(); },
   pick: function (el) { var id = elId(el); if (!id) return; S.sel = id; S.drawerOpen = true; if (S.tab === 'map') S.focus = S.idx.parentOf(id); renderContent(true); renderDrawer(); },
