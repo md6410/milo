@@ -22,6 +22,8 @@ for f in sorted(glob.glob(os.path.join(os.path.dirname(__file__), 'm[0-9]*.py'))
             nt = attach_to_module(doc.nodes[0])
             if nt: print('   تست:', slug, nt)
         data = dsl.export_project(doc, slug, title, mod.SUMMARY, mod.NAME) if hasattr(mod, 'SUMMARY') else dsl.export(doc, slug, title)
+        if hasattr(mod, 'extra'):
+            mod.extra(data)
         dsl.dump(data, os.path.join(OUT, slug + '.pm.json'))
         kinds = {}
         for n in data['nodes']:

@@ -24,6 +24,7 @@ library/invoice-builder.pm.json
 library/label-maker.pm.json
 library/neshan-map.pm.json
 library/order-checkout.pm.json
+library/p-8cell.pm.json
 library/p-invora.pm.json
 library/p-weby.pm.json
 library/partner-accounting.pm.json
