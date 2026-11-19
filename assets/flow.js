@@ -43,11 +43,15 @@
     Object.keys(cols).forEach(function (c) { s += '<marker id="m' + c.replace('#', '') + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="' + c + '"/></marker>'; });
     s += '</defs>';
     if (bg) s += '<rect x="' + vb[0] + '" y="' + vb[1] + '" width="' + vb[2] + '" height="' + vb[3] + '" fill="' + bg + '"/>';
+    var obs = nodes.map(function (n) { return { l: n.x - 14, t: n.y - 14, r: n.x + n.w + 14, b: n.y + n.h + 14 }; }), used = [];
     (flow.edges || []).forEach(function (e) {
       var a = by[e.from], b = by[e.to]; if (!a || !b) return;
-      var pa = CV.anchor(a, b.x + b.w / 2, b.y + b.h / 2), pb = CV.anchor(b, a.x + a.w / 2, a.y + a.h / 2), c = CV.curve(pa, pb, pa, pb), col = e.color || '#7d88a3';
-      s += '<path d="' + c.d + '" fill="none" stroke="' + col + '" stroke-width="2" marker-end="url(#m' + col.replace('#', '') + ')"/>';
-      if (e.label) s += '<rect x="' + (c.mid.x - e.label.length * 3.6 - 6) + '" y="' + (c.mid.y - 11) + '" width="' + (e.label.length * 7.2 + 12) + '" height="20" rx="10" fill="' + (bg || '#fff') + '" stroke="' + col + '"/><text x="' + c.mid.x + '" y="' + (c.mid.y + 4) + '" font-size="12" text-anchor="middle" fill="' + ink + '">' + esc(e.label) + '</text>';
+      var pa = CV.anchor(a, b.x + b.w / 2, b.y + b.h / 2), pb = CV.anchor(b, a.x + a.w / 2, a.y + a.h / 2), col = e.color || '#7d88a3';
+      var pts = (nodes.length < 90 && CV.route(pa, pb, obs, used)) || CV.quickRoute(pa, pb);
+      var d = CV.toPath(pts), mid = CV.midOf(pts);
+      for (var q = 1; q < pts.length; q++) { var u = pts[q - 1], w = pts[q]; if (u.y === w.y) used.push({ h: true, c: u.y, lo: Math.min(u.x, w.x), hi: Math.max(u.x, w.x) }); else if (u.x === w.x) used.push({ h: false, c: u.x, lo: Math.min(u.y, w.y), hi: Math.max(u.y, w.y) }); }
+      s += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" marker-end="url(#m' + col.replace('#', '') + ')"/>';
+      if (e.label) s += '<rect x="' + (mid.x - e.label.length * 3.6 - 6) + '" y="' + (mid.y - 11) + '" width="' + (e.label.length * 7.2 + 12) + '" height="20" rx="10" fill="' + (bg || '#fff') + '" stroke="' + col + '"/><text x="' + mid.x + '" y="' + (mid.y + 4) + '" font-size="12" text-anchor="middle" fill="' + ink + '">' + esc(e.label) + '</text>';
     });
     nodes.forEach(function (n) {
       var col = colorOf(n) || ink, t = TYPES[n.type] || TYPES.process;
@@ -79,17 +83,18 @@
     var data = opt.flow && opt.flow.nodes ? clone(opt.flow) : { v: 1, nodes: [], edges: [] };
     data.edges = data.edges || [];
     var hist = [JSON.stringify(data)], hi = 0, dirty = false, saving = false, cv = null, drop = 0;
-    var ov = document.createElement('div'); ov.className = 'fl-ov';
+    var RO = !!opt.readonly;
+    var ov = document.createElement('div'); ov.className = 'fl-ov' + (RO ? ' ro' : '');
     var pal = ORDER.map(function (k) {
       var t = TYPES[k], sh = CV.shapePath(t.shape, 44, 28);
       return '<button type="button" class="fl-p" draggable="true" data-t="' + k + '" title="' + t.name + ' — کلیک یا بکشید"><svg viewBox="0 0 44 28" width="44" height="28"><path d="' + sh + '" fill="' + (t.color || '#888888') + '" fill-opacity=".15" stroke="' + (t.color || '#888888') + '" stroke-width="1.6"' + (k === 'text' ? ' stroke-dasharray="3 2"' : '') + '/></svg><span>' + t.name + '</span></button>';
     }).join('');
     ov.innerHTML = '<div class="fl-top"><b class="fl-title">' + esc(opt.title || 'فلوچارت') + '</b><span class="fl-sp"></span>' +
-      '<button class="btn sm" data-a="undo" title="Ctrl+Z">↶ برگردان</button><button class="btn sm" data-a="redo" title="Ctrl+Y">↷ از نو</button>' +
+      (RO ? '<span class="pill">فقط مشاهده — برای تغییر، «شروع ویرایش» را در برنامه بزنید</span>' : '<button class="btn sm" data-a="undo" title="Ctrl+Z">↶ برگردان</button><button class="btn sm" data-a="redo" title="Ctrl+Y">↷ از نو</button>') +
       '<button class="btn sm" data-a="zout">－</button><button class="btn sm" data-a="fit">جا بده</button><button class="btn sm" data-a="zin">＋</button>' +
       '<button class="btn sm" data-a="svg">⬇ تصویر SVG</button><button class="btn sm" data-a="mmd">کپی Mermaid</button>' +
-      '<button class="btn sm pri" data-a="save">ذخیره</button><button class="btn sm" data-a="saveclose">ذخیره و بستن</button><button class="btn sm" data-a="close">✕</button></div>' +
-      '<div class="fl-body"><div class="fl-pal">' + pal + '<div class="fl-hint">دوبار کلیک روی بوم = شکلِ تازه<br>از نقطهٔ کنارِ هر شکل بکشید و روی شکلِ دیگر رها کنید = اتصال<br>رها کردن روی جای خالی = شکل + اتصال<br>روی شکل/پیکان کلیک کنید تا رنگ و ابزار بیاید<br>Shift+کشیدن = انتخابِ چندتایی</div></div><div class="fl-cv"></div></div>';
+      (RO ? '' : '<button class="btn sm pri" data-a="save">ذخیره</button><button class="btn sm" data-a="saveclose">ذخیره و بستن</button>') + '<button class="btn sm" data-a="close">✕ بستن</button></div>' +
+      '<div class="fl-body">' + (RO ? '' : '<div class="fl-pal">' + pal + '<div class="fl-hint">دوبار کلیک روی بوم = شکلِ تازه<br>از نقطهٔ کنارِ هر شکل بکشید و روی شکلِ دیگر رها کنید = اتصال<br>رها کردن روی جای خالی = شکل + اتصال<br>روی شکل/پیکان کلیک کنید تا رنگ و ابزار بیاید<br>Shift+کشیدن = انتخابِ چندتایی</div></div>') + '<div class="fl-cv"></div></div>';
     document.body.appendChild(ov);
     var host = ov.querySelector('.fl-cv');
 
@@ -107,7 +112,7 @@
       if (data.nodes.length) { if (e) e.remove(); return; }
       if (e) return;
       e = document.createElement('div'); e.className = 'fl-empty cv-ui';
-      e.innerHTML = '<div>بومِ خالی است.<br>یک شکل از نوارِ کناری بکشید، یا روی بوم دوبار کلیک کنید.</div><button class="btn pri" data-a="sample">با یک نمونه شروع کن</button>';
+      e.innerHTML = RO ? '<div>این بخش فلوچارتی ندارد.</div>' : '<div>بومِ خالی است.<br>یک شکل از نوارِ کناری بکشید، یا روی بوم دوبار کلیک کنید.</div><button class="btn pri" data-a="sample">با یک نمونه شروع کن</button>';
       host.appendChild(e);
     }
     function commit() {
@@ -116,7 +121,7 @@
       hist = hist.slice(0, hi + 1); hist.push(s); if (hist.length > 80) hist.shift(); hi = hist.length - 1; dirty = true; mark();
     }
     function restore(i) { hi = i; data = JSON.parse(hist[hi]); dirty = true; render(false); mark(); }
-    function mark() { var b = ov.querySelector('[data-a=save]'); b.textContent = dirty ? 'ذخیره ●' : 'ذخیره'; ov.querySelector('[data-a=undo]').disabled = hi === 0; ov.querySelector('[data-a=redo]').disabled = hi >= hist.length - 1; }
+    function mark() { if (RO) return; var b = ov.querySelector('[data-a=save]'); b.textContent = dirty ? 'ذخیره ●' : 'ذخیره'; ov.querySelector('[data-a=undo]').disabled = hi === 0; ov.querySelector('[data-a=redo]').disabled = hi >= hist.length - 1; }
     function nodeById(id) { for (var i = 0; i < data.nodes.length; i++) if (data.nodes[i].id === id) return data.nodes[i]; return null; }
     function addNode(type, cx, cy, editNow) {
       var t = TYPES[type], n = { id: uid(data.nodes, 'n'), type: type, text: type === 'text' ? 'متن' : t.name, x: 0, y: 0, w: t.w, h: t.h, color: null };
@@ -139,7 +144,7 @@
       commit(); render(false);
     }
     var cnt = 0;
-    cv = CV.create(host, { id: 'fl', onView: null,
+    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO,
       onMove: function (list) { list.forEach(function (m) { var n = nodeById(m.id); if (n) { n.x = m.x; n.y = m.y; } }); commit(); },
       onAdd: function (p) { addNode('process', p.x, p.y, true); },
       onConnect: function (a, b) { addEdge(a.id, b.id); },

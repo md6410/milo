@@ -129,8 +129,10 @@ function pm_import(PDO $db, array $doc, string $mode, ?int $pid, string $author)
             $f = $map[$fk] ?? (isset($ex[$fk]) ? (int)$fk : 0);
             $t = $map[$tk] ?? (isset($ex[$tk]) ? (int)$tk : 0);
             if (!$f || !$t || $f === $t) { $stat['warnings'][] = "وابستگیِ نامعتبر: $fk → $tk"; continue; }
-            $q = $db->prepare('SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=?');
-            $q->execute([$pid, $f, $t]);
+            $outN = pm_str($d['out'] ?? ($d['out_name'] ?? ''), 200) ?: null;
+            $inN = pm_str($d['in'] ?? ($d['in_name'] ?? ''), 200) ?: null;
+            $q = $db->prepare("SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=? AND COALESCE(out_name,'')=? AND COALESCE(in_name,'')=?");
+            $q->execute([$pid, $f, $t, $outN ?? '', $inN ?? '']);
             $eid = $q->fetchColumn();
             if (!empty($d['deleted'])) {
                 if ($eid) $db->prepare('DELETE FROM deps WHERE id=?')->execute([$eid]);
@@ -144,8 +146,8 @@ function pm_import(PDO $db, array $doc, string $mode, ?int $pid, string $author)
                 $stat['warnings'][] = "وابستگیِ «$fk → $tk» دور یا رابطهٔ والد/فرزند می‌ساخت؛ رد شد";
                 continue;
             }
-            $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label) VALUES(?,?,?,?)')
-               ->execute([$pid, $f, $t, pm_str($d['label'] ?? '', 300)]);
+            $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?)')
+               ->execute([$pid, $f, $t, pm_str($d['label'] ?? '', 300), $outN, $inN]);
             $stat['deps']++;
         }
 
@@ -227,6 +229,8 @@ function pm_import(PDO $db, array $doc, string $mode, ?int $pid, string $author)
             $stat['reports']++;
         }
 
+        pm_fix_hierarchy($db, $pid, $stat['warnings']);
+        pm_chg($db, $pid, null, 'ایمپورت فایل', $stat['nodes_new'] . ' تازه، ' . $stat['nodes_updated'] . ' به‌روز، ' . $stat['reports'] . ' گزارش', $author);
         $db->prepare('UPDATE projects SET updated_at=? WHERE id=?')->execute([$now, $pid]);
         $db->commit();
     } catch (Throwable $e) {

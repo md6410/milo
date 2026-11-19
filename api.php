@@ -112,7 +112,7 @@ try {
 
         // ---- پروژه‌ها
         case 'projects':
-            $rows = $db->query('SELECT * FROM projects ORDER BY updated_at DESC')->fetchAll();
+            $rows = $db->query("SELECT * FROM projects WHERE kind='project' ORDER BY updated_at DESC")->fetchAll();
             out(['projects' => array_map(fn($p) => pm_project_summary($db, $p), $rows)]);
 
         case 'project_save':
@@ -129,17 +129,20 @@ try {
                 $needProject();
                 $db->prepare('UPDATE projects SET name=?,description=?,start_date=?,target_date=?,status=?,ai_brief=?,updated_at=? WHERE id=?')
                    ->execute([...array_values($f), $now, $pid]);
+                pm_chg($db, $pid, null, 'ویرایش تنظیمات پروژه', '', $author);
             } else {
                 $db->prepare('INSERT INTO projects(name,description,start_date,target_date,status,ai_brief,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
                    ->execute([...array_values($f), $now, $now]);
                 $pid = (int)$db->lastInsertId();
+                pm_chg($db, $pid, null, 'ساخت پروژه', $f['name'], $author);
             }
             out(['id' => $pid]);
 
         case 'project_delete':
+            if (pm_proj_kind($db, $pid) === 'library') fail('کتابخانهٔ ماژول‌ها پاک نمی‌شود');
             $needProject();
             pm_delete_files($db, 'project_id=?', [$pid]);
-            foreach (['deps', 'milestones', 'logs', 'nodes'] as $t) $db->prepare("DELETE FROM $t WHERE project_id=?")->execute([$pid]);
+            foreach (['deps', 'milestones', 'logs', 'nodes', 'changes', 'revisions'] as $t) $db->prepare("DELETE FROM $t WHERE project_id=?")->execute([$pid]);
             $db->prepare('DELETE FROM projects WHERE id=?')->execute([$pid]);
             out(['ok' => true]);
 
@@ -153,41 +156,148 @@ try {
                 'milestones' => $q('SELECT * FROM milestones WHERE project_id=? ORDER BY date,id'),
                 'logs' => $q('SELECT * FROM logs WHERE project_id=? ORDER BY created_at DESC, id DESC LIMIT 3000'),
                 'files' => $q('SELECT id,project_id,node_id,log_id,name,mime,size,created_at FROM files WHERE project_id=? ORDER BY id'),
+                'changes' => $q('SELECT * FROM changes WHERE project_id=? ORDER BY id DESC LIMIT 150'),
+                'revisions' => $q('SELECT id,project_id,note,summary,author,created_at FROM revisions WHERE project_id=? ORDER BY id DESC LIMIT 50'),
             ]);
+
+        // ---- کتابخانهٔ ماژول‌ها (پروژهٔ ویژه که همهٔ پروژه‌ها از آن استفاده می‌کنند)
+        case 'library':
+            out(['id' => pm_library_id($db)]);
+
+        case 'library_list':
+            $lid = pm_library_id($db);
+            $st = $db->prepare("SELECT * FROM nodes WHERE project_id=? AND parent_id IS NULL AND kind='module' ORDER BY title");
+            $st->execute([$lid]);
+            $mods = array_map('pm_node_out', $st->fetchAll());
+            foreach ($mods as &$m) {
+                $m['children'] = count(pm_subtree($db, $lid, $m['id']));
+                unset($m['details'], $m['flow'], $m['tech']);
+            }
+            out(['library_id' => $lid, 'modules' => $mods]);
+
+        case 'node_copy':     // src_node_id → dst_project_id / dst_parent_id (+ x,y,title)
+            $src = (int)($in['src_node_id'] ?? 0);
+            $dstPid = (int)($in['dst_project_id'] ?? 0);
+            $dstParent = ($in['dst_parent_id'] ?? null) ? (int)$in['dst_parent_id'] : null;
+            $st = $db->prepare('SELECT id FROM projects WHERE id=?'); $st->execute([$dstPid]);
+            if (!$st->fetchColumn()) fail('پروژهٔ مقصد پیدا نشد', 404);
+            $over = [];
+            if (isset($in['title'])) $over['title'] = pm_str($in['title'], 300);
+            if (isset($in['x'])) $over['x'] = (float)$in['x'];
+            if (isset($in['y'])) $over['y'] = (float)$in['y'];
+            $db->beginTransaction();
+            try { $r = pm_copy_subtree($db, $src, $dstPid, $dstParent, $over); $db->commit(); }
+            catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); fail($e->getMessage()); }
+            pm_chg($db, $dstPid, $r['id'], 'درج ماژول از کتابخانه/رونوشت', $r['count'] . ' بخش', $author);
+            $db->prepare('UPDATE projects SET updated_at=? WHERE id=?')->execute([$now, $dstPid]);
+            out(['id' => $r['id'], 'count' => $r['count']]);
+
+        // ---- نسخه‌ها (ذخیره / بازگردانی)
+        case 'revision_save':
+            $needProject();
+            $snap = pm_snapshot($db, $pid);
+            $note = pm_str($in['note'] ?? '', 300);
+            $sum = pm_str($in['summary'] ?? '', 1000);
+            $db->prepare('INSERT INTO revisions(project_id,note,summary,author,created_at,data) VALUES(?,?,?,?,?,?)')
+               ->execute([$pid, $note, $sum, $author, $now, json_encode($snap, JSON_UNESCAPED_UNICODE)]);
+            pm_chg($db, $pid, null, 'ذخیرهٔ نسخه', $note ?: $sum, $author);
+            $db->prepare('DELETE FROM revisions WHERE project_id=? AND id NOT IN (SELECT id FROM revisions WHERE project_id=? ORDER BY id DESC LIMIT 60)')->execute([$pid, $pid]);
+            out(['ok' => true, 'id' => (int)$db->lastInsertId()]);
+
+        case 'revision_restore':
+            $needProject();
+            $st = $db->prepare('SELECT * FROM revisions WHERE id=? AND project_id=?');
+            $st->execute([(int)($in['id'] ?? 0), $pid]);
+            $rv = $st->fetch() ?: fail('نسخه پیدا نشد', 404);
+            pm_restore($db, $pid, json_decode((string)$rv['data'], true) ?: []);
+            pm_chg($db, $pid, null, 'بازگردانی نسخه', 'نسخهٔ ' . $rv['created_at'], $author);
+            $touch();
+            out(['ok' => true]);
+
+        case 'project_restore':  // بازگشت به تصویری که کلاینت در آغازِ ویرایش گرفته بود (لغوِ تغییرات)
+            $needProject();
+            $snap = $in['snapshot'] ?? null;
+            if (!is_array($snap) || !isset($snap['nodes'])) fail('تصویر نامعتبر');
+            pm_restore($db, $pid, $snap);
+            pm_chg($db, $pid, null, 'لغوِ تغییرات ویرایش', '', $author);
+            $touch();
+            out(['ok' => true]);
+
+        // ---- زمانِ کار
+        case 'time_add':
+            $needProject();
+            $sec = max(0, min(3600, (int)($in['seconds'] ?? 0)));
+            $nid = (int)($in['node_id'] ?? 0);
+            if ($sec) {
+                $own = false;
+                if ($nid) { $q = $db->prepare('SELECT 1 FROM nodes WHERE id=? AND project_id=?'); $q->execute([$nid, $pid]); $own = (bool)$q->fetchColumn(); }
+                if ($own) $db->prepare('UPDATE nodes SET work_seconds=COALESCE(work_seconds,0)+? WHERE id=?')->execute([$sec, $nid]);
+                else $db->prepare('UPDATE projects SET work_seconds=COALESCE(work_seconds,0)+? WHERE id=?')->execute([$sec, $pid]);   // بخش دیگر نیست (مثلاً لغوِ تغییرات): به کارِ کلیِ پروژه
+            }
+            out(['ok' => true]);
 
         // ---- بخش‌ها
         case 'node_save':
             $needProject();
+            $pk = pm_proj_kind($db, $pid);
             $id = (int)($in['id'] ?? 0);
             $f = pm_clean_node($in);
+            $isNew = !$id;
             if (!$id) {
                 $parent = isset($in['parent_id']) && $in['parent_id'] !== null && $in['parent_id'] !== '' ? (int)$in['parent_id'] : null;
-                if ($parent) $ownNode($parent);
+                $parentKind = null;
+                if ($parent) { $parentKind = $ownNode($parent)['kind']; }
                 if (empty($f['title'])) fail('عنوان لازم است');
+                $kind = $f['kind'] ?? ($pk === 'library' && !$parent ? 'module' : (pm_child_kinds($parentKind, $pk)[0] ?? ''));
+                if (!in_array($kind, pm_child_kinds($parentKind, $pk), true)) fail('این نوع در این جایگاه مجاز نیست');
+                $f['kind'] = $kind;
                 $db->prepare('INSERT INTO nodes(project_id,parent_id,title,sort,created_at,updated_at) VALUES(?,?,?,?,?,?)')
                    ->execute([$pid, $parent, $f['title'], pm_next_sort($db, $pid, $parent), $now, $now]);
                 $id = (int)$db->lastInsertId();
-                $cur = ['status' => 'todo', 'progress' => 0, 'done_date' => null];
+                $cur = ['status' => 'todo', 'progress' => 0, 'done_date' => null, 'kind' => $kind];
             } else {
                 $cur = $ownNode($id);
                 if (array_key_exists('title', $f) && $f['title'] === '') fail('عنوان لازم است');
+                $curParent = isset($cur['parent_id']) ? (int)$cur['parent_id'] : null;
+                $newParent = $curParent;
                 if (array_key_exists('parent_id', $in)) {
                     $parent = $in['parent_id'] === null || $in['parent_id'] === '' ? null : (int)$in['parent_id'];
-                    if ($parent !== (isset($cur['parent_id']) ? (int)$cur['parent_id'] : null)) {
+                    if ($parent !== $curParent) {
                         if ($parent) {
                             $ownNode($parent);
                             if ($parent === $id || in_array($parent, pm_subtree($db, $pid, $id), true)) fail('بخش را نمی‌شود زیرِ خودش گذاشت');
                         }
                         $f['parent_id'] = $parent;
                         $f['sort'] = pm_next_sort($db, $pid, $parent);
+                        $newParent = $parent;
+                    }
+                }
+                $kind = $f['kind'] ?? $cur['kind'];
+                if (isset($f['kind']) || $newParent !== $curParent) {
+                    $pkind = $newParent ? $ownNode($newParent)['kind'] : null;
+                    if (!in_array($kind, pm_child_kinds($pkind, $pk), true)) fail('این نوع در این جایگاه مجاز نیست');
+                    $allowedBelow = pm_child_kinds($kind, $pk);
+                    foreach (pm_subtree($db, $pid, $id) as $cid) {
+                        $ck = $db->query('SELECT parent_id, kind FROM nodes WHERE id=' . (int)$cid)->fetch();
+                        if ((int)$ck['parent_id'] === $id && !in_array($ck['kind'], $allowedBelow, true)) fail('زیرمجموعه‌های فعلیِ این بخش با نوعِ تازه سازگار نیستند');
                     }
                 }
             }
+            pm_enforce_io($f, $kind);
             $m = pm_norm(array_merge($cur, $f), array_keys($f));
             $f['status'] = $m['status']; $f['progress'] = $m['progress']; $f['done_date'] = $m['done_date'];
             $f['updated_at'] = $now;
             $set = implode(',', array_map(fn($k) => "$k=?", array_keys($f)));
             $db->prepare("UPDATE nodes SET $set WHERE id=?")->execute([...array_values($f), $id]);
+            if ($isNew) pm_chg($db, $pid, $id, 'ساخت ' . ['area' => 'بخش کلی', 'section' => 'بخش', 'module' => 'ماژول', 'task' => 'کار'][$kind], $f['title'], $author);
+            else {
+                $chg = [];
+                foreach ($f as $k => $v) {
+                    if (in_array($k, ['updated_at', 'sort', 'done_date', 'x', 'y'], true)) continue;
+                    if ((string)($cur[$k] ?? '') !== (string)$v) $chg[] = PM_FIELD_LABELS[$k] ?? $k;
+                }
+                if ($chg) pm_chg($db, $pid, $id, 'ویرایش', implode('، ', $chg), $author);
+            }
             $touch();
             out(['id' => $id]);
 
@@ -203,9 +313,13 @@ try {
                 if (!$f) continue;
                 $m = pm_norm(array_merge($cur, $f), array_keys($f));
                 $f['status'] = $m['status']; $f['progress'] = $m['progress']; $f['done_date'] = $m['done_date'];
+                pm_enforce_io($f, $cur['kind']);
                 $f['updated_at'] = $now;
                 $set = implode(',', array_map(fn($k) => "$k=?", array_keys($f)));
                 $db->prepare("UPDATE nodes SET $set WHERE id=?")->execute([...array_values($f), $id]);
+                $names = [];
+                foreach ($f as $k => $v) if (!in_array($k, ['updated_at', 'x', 'y', 'done_date', 'sort', 'status', 'progress'], true) || in_array($k, ['status', 'progress'], true) && (string)$cur[$k] !== (string)$v) $names[] = PM_FIELD_LABELS[$k] ?? $k;
+                if ($names) pm_chg($db, $pid, $id, 'ویرایش', implode('، ', array_unique($names)), $author);
             }
             $db->commit();
             $touch();
@@ -216,10 +330,13 @@ try {
             $id = (int)$in['id'];
             $ownNode($id);
             $parent = ($in['parent_id'] ?? null) ? (int)$in['parent_id'] : null;
+            $mine = $ownNode($id);
+            $pkind = null;
             if ($parent) {
-                $ownNode($parent);
+                $pkind = $ownNode($parent)['kind'];
                 if ($parent === $id || in_array($parent, pm_subtree($db, $pid, $id), true)) fail('بخش را نمی‌شود زیرِ خودش گذاشت');
             }
+            if (!in_array($mine['kind'], pm_child_kinds($pkind, pm_proj_kind($db, $pid)), true)) fail('این نوع در آن جایگاه مجاز نیست');
             $st = $db->prepare('SELECT id FROM nodes WHERE project_id=? AND parent_id IS ? AND id<>? ORDER BY sort,id');
             $st->execute([$pid, $parent, $id]);
             $ids = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
@@ -228,11 +345,14 @@ try {
             $db->prepare('UPDATE nodes SET parent_id=? WHERE id=?')->execute([$parent, $id]);
             foreach ($ids as $i => $nid) $db->prepare('UPDATE nodes SET sort=? WHERE id=?')->execute([$i + 1, $nid]);
             $db->commit();
+            if ((int)($mine['parent_id'] ?? 0) !== (int)$parent) pm_chg($db, $pid, $id, 'جابه‌جایی', 'به ' . ($parent ? pm_path($db, $parent, true) : 'سطح اصلی'), $author);
             $touch();
             out(['ok' => true]);
 
         case 'node_delete':
             $needProject();
+            $dn = $ownNode((int)$in['id']);
+            pm_chg($db, $pid, null, 'حذف ' . ['area' => 'بخش کلی', 'section' => 'بخش', 'module' => 'ماژول', 'task' => 'کار'][$dn['kind']] ?? 'بخش', ($dn['title']) . ' — ' . pm_path($db, (int)$dn['id']), $author);
             $n = pm_delete_nodes($db, $pid, (int)$in['id']);
             $touch();
             out(['deleted' => $n]);
@@ -241,24 +361,29 @@ try {
         case 'dep_save':
             $needProject();
             $f = (int)$in['from_id']; $t = (int)$in['to_id'];
-            $ownNode($f); $ownNode($t);
+            $fn = $ownNode($f); $tn = $ownNode($t);
             if ($f === $t) fail('یک بخش به خودش وابسته نمی‌شود');
             if (pm_is_related($db, $pid, $f, $t)) fail('بین یک بخش و زیرمجموعه‌اش وابستگی معنا ندارد');
-            $st = $db->prepare('SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=?');
-            $st->execute([$pid, $f, $t]);
+            $outN = pm_str($in['out_name'] ?? '', 200) ?: null;
+            $inN = pm_str($in['in_name'] ?? '', 200) ?: null;
+            $st = $db->prepare('SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=? AND COALESCE(out_name,\'\')=? AND COALESCE(in_name,\'\')=?');
+            $st->execute([$pid, $f, $t, $outN ?? '', $inN ?? '']);
             $eid = $st->fetchColumn();
             $label = pm_str($in['label'] ?? '', 300);
             if ($eid) {
                 $db->prepare('UPDATE deps SET label=? WHERE id=?')->execute([$label, $eid]);
             } else {
                 if (pm_dep_path($db, $pid, $t, $f)) fail('این وابستگی دور می‌سازد (به‌هم‌وابستگیِ چرخه‌ای)');
-                $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label) VALUES(?,?,?,?)')->execute([$pid, $f, $t, $label]);
+                $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?)')->execute([$pid, $f, $t, $label, $outN, $inN]);
+                pm_chg($db, $pid, $t, 'ساخت پیوند', $fn['title'] . ($outN ? ' (' . $outN . ')' : '') . ' ← ' . $tn['title'] . ($inN ? ' (' . $inN . ')' : ''), $author);
             }
             $touch();
             out(['ok' => true]);
 
         case 'dep_delete':
             $needProject();
+            $dd = $db->prepare('SELECT * FROM deps WHERE id=? AND project_id=?'); $dd->execute([(int)$in['id'], $pid]); $dr = $dd->fetch();
+            if ($dr) pm_chg($db, $pid, (int)$dr['to_id'], 'حذف پیوند', pm_path($db, (int)$dr['from_id'], true) . ' ← ' . pm_path($db, (int)$dr['to_id'], true), $author);
             $db->prepare('DELETE FROM deps WHERE id=? AND project_id=?')->execute([(int)$in['id'], $pid]);
             $touch();
             out(['ok' => true]);
@@ -272,6 +397,7 @@ try {
             $vals = [$title, pm_date($in['date'] ?? null), !empty($in['done']) ? 1 : 0, pm_str($in['note'] ?? '', 2000)];
             if ($id) $db->prepare('UPDATE milestones SET title=?,date=?,done=?,note=? WHERE id=? AND project_id=?')->execute([...$vals, $id, $pid]);
             else $db->prepare('INSERT INTO milestones(title,date,done,note,project_id) VALUES(?,?,?,?,?)')->execute([...$vals, $pid]);
+            pm_chg($db, $pid, null, $id ? 'ویرایش نقطهٔ عطف' : 'ساخت نقطهٔ عطف', $title, $author);
             $touch();
             out(['ok' => true]);
 
@@ -295,6 +421,7 @@ try {
                ->execute([$pid, $node, $kind, $body, $author, $now]);
             $lid = (int)$db->lastInsertId();
             $saved = $hasFiles ? pm_save_uploads($db, $pid, $node, $lid, $files) : 0;
+            pm_chg($db, $pid, $node, $kind === 'ai_report' ? 'گزارش هوش مصنوعی' : 'یادداشت', mb_substr($body, 0, 80) . ($saved ? ' (+' . $saved . ' پیوست)' : ''), $author);
             $touch();
             out(['id' => $lid, 'files' => $saved]);
 
@@ -312,6 +439,7 @@ try {
             if ($node) $ownNode($node);
             $n = pm_save_uploads($db, $pid, $node, null, $_FILES['files'] ?? null);
             if (!$n) fail('فایلی ذخیره نشد (حجم یا نوع؟)');
+            pm_chg($db, $pid, $node, 'پیوست', $n . ' فایل', $author);
             $touch();
             out(['files' => $n]);
 

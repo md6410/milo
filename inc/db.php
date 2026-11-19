@@ -7,7 +7,7 @@ declare(strict_types=1);
 
 const PM_DATA = __DIR__ . '/../data';
 const PM_STATUSES = ['todo', 'doing', 'review', 'done', 'blocked', 'hold'];
-const PM_KINDS = ['section', 'module', 'task'];
+const PM_KINDS = ['area', 'section', 'module', 'task'];
 
 function pm_db(): PDO
 {
@@ -30,7 +30,7 @@ function pm_db(): PDO
 function pm_schema(PDO $db): void
 {
     $v = (int)$db->query('PRAGMA user_version')->fetchColumn();
-    if ($v >= 2) return;
+    if ($v >= 3) return;
     if ($v < 1) $db->exec("
     CREATE TABLE IF NOT EXISTS users(
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
@@ -64,11 +64,33 @@ function pm_schema(PDO $db): void
       name TEXT NOT NULL, stored TEXT NOT NULL, mime TEXT DEFAULT '', size INTEGER DEFAULT 0, created_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS files_p ON files(project_id);
     PRAGMA user_version=1;");
-    // v2: بوم گرافیکی (جایگاه، رنگ، آیکن) و فلوچارتِ هر بخش
-    foreach (['x REAL', 'y REAL', 'color TEXT', 'icon TEXT', 'flow TEXT'] as $c) {
-        try { $db->exec("ALTER TABLE nodes ADD COLUMN $c"); } catch (Throwable $e) { /* ستون از قبل هست */ }
+    if ($v < 2) {
+        // v2: بوم گرافیکی (جایگاه، رنگ، آیکن) و فلوچارتِ هر بخش
+        foreach (['x REAL', 'y REAL', 'color TEXT', 'icon TEXT', 'flow TEXT'] as $c) {
+            try { $db->exec("ALTER TABLE nodes ADD COLUMN $c"); } catch (Throwable $e) { /* ستون از قبل هست */ }
+        }
+        $db->exec('PRAGMA user_version=2');
     }
-    $db->exec('PRAGMA user_version=2');
+    if ($v < 3) {
+        // v3: سلسله‌مراتبِ بخش کلی/بخش/ماژول/کار، کتابخانهٔ ماژول، پورت‌ها، زمانِ کار، تاریخچهٔ تغییرات و نسخه‌ها
+        foreach (["ALTER TABLE projects ADD COLUMN kind TEXT DEFAULT 'project'", 'ALTER TABLE projects ADD COLUMN work_seconds INTEGER DEFAULT 0',
+                  'ALTER TABLE nodes ADD COLUMN work_seconds INTEGER DEFAULT 0', 'ALTER TABLE nodes ADD COLUMN src_id INTEGER', 'ALTER TABLE nodes ADD COLUMN src_name TEXT',
+                  'ALTER TABLE deps ADD COLUMN out_name TEXT', 'ALTER TABLE deps ADD COLUMN in_name TEXT'] as $q) {
+            try { $db->exec($q); } catch (Throwable $e) { /* ستون از قبل هست */ }
+        }
+        $db->exec("
+        CREATE TABLE IF NOT EXISTS changes(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, node_id INTEGER, path TEXT DEFAULT '',
+          action TEXT DEFAULT '', detail TEXT DEFAULT '', author TEXT DEFAULT '', created_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS changes_p ON changes(project_id, id);
+        CREATE TABLE IF NOT EXISTS revisions(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL, note TEXT DEFAULT '', summary TEXT DEFAULT '',
+          author TEXT DEFAULT '', created_at TEXT NOT NULL, data TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS revisions_p ON revisions(project_id, id);
+        UPDATE projects SET kind='project' WHERE kind IS NULL;
+        UPDATE nodes SET kind='area' WHERE parent_id IS NULL;
+        PRAGMA user_version=3;");
+    }
 }
 
 function pm_now(): string { return date('Y-m-d H:i:s'); }
@@ -189,9 +211,10 @@ function pm_flow_clean($f): ?array
 
 function pm_node_out(array $r): array
 {
+    $r['work_seconds'] = (int)($r['work_seconds'] ?? 0);
     $r['flow'] = !empty($r['flow']) ? (json_decode((string)$r['flow'], true) ?: null) : null;
     foreach (['x', 'y'] as $k) if (($r[$k] ?? null) !== null) $r[$k] = (float)$r[$k];
-    foreach (['id', 'project_id', 'parent_id', 'priority', 'progress', 'sort'] as $k) {
+    foreach (['id', 'project_id', 'parent_id', 'priority', 'progress', 'sort', 'work_seconds', 'src_id'] as $k) {
         if ($r[$k] !== null) $r[$k] = (int)$r[$k];
     }
     foreach (['est_days', 'final_days'] as $k) if ($r[$k] !== null) $r[$k] = (float)$r[$k];
@@ -278,8 +301,208 @@ function pm_project_summary(PDO $db, array $p): array
     $p['progress'] = $sw > 0 ? (int)round($sp / $sw) : 0;
     $p['leaf_count'] = $cnt;
     $p['leaf_done'] = $done;
+    $w = $db->prepare('SELECT COALESCE(SUM(work_seconds),0) FROM nodes WHERE project_id=?');
+    $w->execute([$pid]);
+    $p['work_total'] = (int)$w->fetchColumn() + (int)($p['work_seconds'] ?? 0);
     $n = $db->prepare('SELECT COUNT(*) FROM nodes WHERE project_id=?');
     $n->execute([$pid]);
     $p['node_count'] = (int)$n->fetchColumn();
     return $p;
+}
+
+
+// ===================== سلسله‌مراتب و کتابخانه =====================
+
+/** نوعِ زیرمجموعه‌های مجاز. $parentKind = null یعنی ریشهٔ پروژه (یا ریشهٔ کتابخانه). */
+function pm_child_kinds(?string $parentKind, string $projKind = 'project'): array
+{
+    if ($parentKind === null) return $projKind === 'library' ? ['module'] : ['area'];
+    switch ($parentKind) {
+        case 'area': return ['section', 'module'];
+        case 'section': case 'module': return ['section', 'module', 'task'];
+        default: return [];
+    }
+}
+
+function pm_proj_kind(PDO $db, int $pid): string
+{
+    $st = $db->prepare('SELECT kind FROM projects WHERE id=?');
+    $st->execute([$pid]);
+    return (string)($st->fetchColumn() ?: 'project');
+}
+
+/** «کار» فقط یک ورودی و یک خروجی دارد. */
+function pm_enforce_io(array &$f, string $kind): void
+{
+    if ($kind !== 'task') return;
+    foreach (['inputs', 'outputs'] as $k) {
+        if (isset($f[$k])) {
+            $a = json_decode((string)$f[$k], true) ?: [];
+            $f[$k] = json_encode(array_slice($a, 0, 1), JSON_UNESCAPED_UNICODE);
+        }
+    }
+}
+
+/** مسیرِ والدها: «A › B» (بدونِ خودِ گره) */
+function pm_path(PDO $db, ?int $id, bool $self = false): string
+{
+    $out = []; $g = 0;
+    $st = $db->prepare('SELECT parent_id, title FROM nodes WHERE id=?');
+    $x = $id;
+    while ($x && $g++ < 40) {
+        $st->execute([$x]);
+        $r = $st->fetch();
+        if (!$r) break;
+        if ($x !== $id || $self) array_unshift($out, $r['title']);
+        $x = $r['parent_id'] ? (int)$r['parent_id'] : 0;
+    }
+    return implode(' › ', $out);
+}
+
+/** ثبت در «آخرین تغییرات» */
+function pm_chg(PDO $db, int $pid, ?int $nodeId, string $action, string $detail, string $author): void
+{
+    $path = $nodeId ? pm_path($db, $nodeId, true) : '';
+    $db->prepare('INSERT INTO changes(project_id,node_id,path,action,detail,author,created_at) VALUES(?,?,?,?,?,?,?)')
+       ->execute([$pid, $nodeId, $path, $action, mb_substr($detail, 0, 500), $author, pm_now()]);
+    $db->prepare('DELETE FROM changes WHERE project_id=? AND id<(SELECT COALESCE(MAX(id),0)-1500 FROM changes WHERE project_id=?)')->execute([$pid, $pid]);
+}
+
+function pm_library_id(PDO $db): int
+{
+    $id = $db->query("SELECT id FROM projects WHERE kind='library' ORDER BY id LIMIT 1")->fetchColumn();
+    if ($id) return (int)$id;
+    $now = pm_now();
+    $db->prepare("INSERT INTO projects(name,description,status,kind,created_at,updated_at) VALUES(?,?,?,?,?,?)")
+       ->execute(['کتابخانهٔ ماژول‌ها', 'ماژول‌های قابلِ ذخیره و استفاده در همهٔ پروژه‌ها؛ می‌شود از هر ماژول ارث برد و تغییرش داد.', 'active', 'library', $now, $now]);
+    return (int)$db->lastInsertId();
+}
+
+/** رونوشتِ عمیق از یک گره (با زیرمجموعه و وابستگی‌های درونش) به پروژهٔ دیگر. شناسهٔ ریشهٔ تازه را می‌دهد. */
+function pm_copy_subtree(PDO $db, int $srcId, int $dstPid, ?int $dstParent, array $over = []): array
+{
+    $st = $db->prepare('SELECT * FROM nodes WHERE id=?');
+    $st->execute([$srcId]);
+    $root = $st->fetch();
+    if (!$root) throw new RuntimeException('بخشِ مبدأ پیدا نشد');
+    $srcPid = (int)$root['project_id'];
+    $dstKind = pm_proj_kind($db, $dstPid);
+    $parentKind = null;
+    if ($dstParent) {
+        $q = $db->prepare('SELECT kind, project_id FROM nodes WHERE id=?');
+        $q->execute([$dstParent]);
+        $pr = $q->fetch();
+        if (!$pr || (int)$pr['project_id'] !== $dstPid) throw new RuntimeException('والدِ مقصد پیدا نشد');
+        $parentKind = $pr['kind'];
+    }
+    if (!in_array($root['kind'], pm_child_kinds($parentKind, $dstKind), true)) throw new RuntimeException('این نوع زیرِ آن بخش مجاز نیست');
+    $ids = array_merge([$srcId], pm_subtree($db, $srcPid, $srcId));
+    $in = implode(',', array_map('intval', $ids));
+    $rows = $db->query("SELECT * FROM nodes WHERE id IN ($in) ORDER BY sort,id")->fetchAll();
+    $map = []; $now = pm_now();
+    $ins = $db->prepare('INSERT INTO nodes(project_id,parent_id,kind,title,summary,details,inputs,outputs,process,tech,priority,status,progress,est_days,final_days,start_date,done_date,assignee,tags,sort,x,y,color,icon,flow,work_seconds,src_id,src_name,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    $byParent = [];
+    foreach ($rows as $r) $byParent[(int)($r['parent_id'] ?? 0)][] = $r;
+    $walk = function ($r, ?int $newParent, bool $isRoot) use (&$walk, &$map, $ins, $dstPid, $now, $over, $byParent, $db) {
+        $title = $isRoot && isset($over['title']) ? $over['title'] : $r['title'];
+        $x = $isRoot && array_key_exists('x', $over) ? $over['x'] : $r['x'];
+        $y = $isRoot && array_key_exists('y', $over) ? $over['y'] : $r['y'];
+        $sort = $isRoot ? pm_next_sort($db, $dstPid, $newParent) : (int)$r['sort'];
+        $ins->execute([$dstPid, $newParent, $r['kind'], $title, $r['summary'], $r['details'], $r['inputs'], $r['outputs'], $r['process'], $r['tech'], $r['priority'],
+            'todo', 0, $r['est_days'], $r['final_days'], null, null, '', $r['tags'], $sort, $x, $y, $r['color'], $r['icon'], $r['flow'], 0,
+            $r['id'], $isRoot ? ($over['src_name'] ?? $r['title']) : ($r['src_name'] ?: null), $now, $now]);
+        $nid = (int)$db->lastInsertId();
+        $map[(int)$r['id']] = $nid;
+        foreach ($byParent[(int)$r['id']] ?? [] as $c) $walk($c, $nid, false);
+    };
+    $walk($root, $dstParent, true);
+    // وابستگی‌های درونیِ زیردرخت
+    $ds = $db->query("SELECT * FROM deps WHERE from_id IN ($in) AND to_id IN ($in)")->fetchAll();
+    $di = $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?)');
+    foreach ($ds as $d) $di->execute([$dstPid, $map[(int)$d['from_id']], $map[(int)$d['to_id']], $d['label'], $d['out_name'], $d['in_name']]);
+    return ['id' => $map[$srcId], 'count' => count($map)];
+}
+
+/** تصویرِ کاملِ ساختار برای نسخه/بازگردانی */
+function pm_snapshot(PDO $db, int $pid): array
+{
+    $q = function (string $sql) use ($db, $pid) { $s = $db->prepare($sql); $s->execute([$pid]); return $s->fetchAll(); };
+    return ['nodes' => $q('SELECT * FROM nodes WHERE project_id=? ORDER BY id'), 'deps' => $q('SELECT * FROM deps WHERE project_id=? ORDER BY id'),
+            'milestones' => $q('SELECT * FROM milestones WHERE project_id=? ORDER BY id')];
+}
+
+/** بازگردانیِ ساختار از تصویر. پیوست‌/یادداشتِ بخش‌هایی که در تصویر نیستند پاک می‌شود. */
+function pm_restore(PDO $db, int $pid, array $snap): void
+{
+    $cols = ['id', 'project_id', 'parent_id', 'kind', 'title', 'summary', 'details', 'inputs', 'outputs', 'process', 'tech', 'priority', 'status', 'progress', 'est_days', 'final_days',
+        'start_date', 'done_date', 'assignee', 'tags', 'sort', 'created_at', 'updated_at', 'x', 'y', 'color', 'icon', 'flow', 'work_seconds', 'src_id', 'src_name'];
+    $keep = [];
+    foreach ($snap['nodes'] ?? [] as $n) $keep[(int)$n['id']] = true;
+    $cur = $db->prepare('SELECT id FROM nodes WHERE project_id=?');
+    $cur->execute([$pid]);
+    $db->beginTransaction();
+    try {
+        foreach ($cur->fetchAll(PDO::FETCH_COLUMN) as $id) {
+            if (empty($keep[(int)$id])) {
+                pm_delete_files($db, 'project_id=? AND node_id=?', [$pid, (int)$id]);
+                $db->prepare('DELETE FROM logs WHERE project_id=? AND node_id=?')->execute([$pid, (int)$id]);
+                $db->prepare('DELETE FROM nodes WHERE id=?')->execute([(int)$id]);
+            }
+        }
+        $db->prepare('DELETE FROM deps WHERE project_id=?')->execute([$pid]);
+        $db->prepare('DELETE FROM milestones WHERE project_id=?')->execute([$pid]);
+        $ph = implode(',', array_fill(0, count($cols), '?'));
+        $up = $db->prepare('INSERT OR REPLACE INTO nodes(' . implode(',', $cols) . ") VALUES($ph)");
+        foreach ($snap['nodes'] ?? [] as $n) {
+            $row = [];
+            foreach ($cols as $c) $row[] = $c === 'project_id' ? $pid : ($n[$c] ?? null);
+            $up->execute($row);
+        }
+        $di = $db->prepare('INSERT INTO deps(id,project_id,from_id,to_id,label,out_name,in_name) VALUES(?,?,?,?,?,?,?)');
+        foreach ($snap['deps'] ?? [] as $d) $di->execute([$d['id'] ?? null, $pid, $d['from_id'], $d['to_id'], $d['label'] ?? '', $d['out_name'] ?? null, $d['in_name'] ?? null]);
+        $mi = $db->prepare('INSERT INTO milestones(id,project_id,title,date,done,note) VALUES(?,?,?,?,?,?)');
+        foreach ($snap['milestones'] ?? [] as $m) $mi->execute([$m['id'] ?? null, $pid, $m['title'], $m['date'] ?? null, $m['done'] ?? 0, $m['note'] ?? '']);
+        $db->commit();
+    } catch (Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+}
+
+const PM_FIELD_LABELS = ['title' => 'عنوان', 'kind' => 'نوع', 'summary' => 'خلاصه', 'details' => 'توضیحات', 'inputs' => 'ورودی‌ها', 'outputs' => 'خروجی‌ها', 'process' => 'پردازش',
+    'tech' => 'نکات فنی', 'priority' => 'اولویت', 'status' => 'وضعیت', 'progress' => 'درصد انجام', 'est_days' => 'برآورد', 'final_days' => 'زمان نهایی', 'start_date' => 'تاریخ شروع',
+    'assignee' => 'مسئول', 'tags' => 'برچسب‌ها', 'color' => 'رنگ', 'icon' => 'آیکن', 'flow' => 'فلوچارت', 'parent_id' => 'جایگاه'];
+
+/** پس از ایمپورت: نوعِ هر بخش را با قواعدِ سلسله‌مراتب هم‌خوان می‌کند (و «کار» را تک‌ورودی/تک‌خروجی). */
+function pm_fix_hierarchy(PDO $db, int $pid, array &$warn): void
+{
+    $pk = pm_proj_kind($db, $pid);
+    $st = $db->prepare('SELECT id, parent_id, kind, title, inputs, outputs FROM nodes WHERE project_id=? ORDER BY sort,id');
+    $st->execute([$pid]);
+    $by = []; $rows = [];
+    foreach ($st as $r) { $rows[(int)$r['id']] = $r; $by[(int)($r['parent_id'] ?? 0)][] = (int)$r['id']; }
+    $walk = function (int $parent, ?string $parentKind) use (&$walk, &$rows, &$by, $db, $pk, &$warn) {
+        foreach ($by[$parent] ?? [] as $id) {
+            $r = $rows[$id];
+            $allowed = pm_child_kinds($parentKind, $pk);
+            $kind = $r['kind'];
+            if (!in_array($kind, $allowed, true) && $allowed) {
+                $new = $kind === 'area' ? 'section' : $allowed[0];
+                if ($kind === 'task' && in_array('task', $allowed, true)) $new = 'task';
+                $db->prepare('UPDATE nodes SET kind=? WHERE id=?')->execute([$new, $id]);
+                $warn[] = 'نوعِ «' . $r['title'] . '» به «' . $new . '» اصلاح شد (در این جایگاه مجاز نبود)';
+                $kind = $new;
+            } elseif (!$allowed) {
+                $warn[] = '«' . $r['title'] . '» زیرِ «کار» است و مجاز نیست؛ نوعِ والد به «بخش» تغییر کرد';
+                if ($parent) { $db->prepare("UPDATE nodes SET kind='section' WHERE id=?")->execute([$parent]); $parentKind = 'section'; }
+                $kind = in_array($kind, ['section', 'module', 'task'], true) ? $kind : 'task';
+                $db->prepare('UPDATE nodes SET kind=? WHERE id=?')->execute([$kind, $id]);
+            }
+            if ($kind === 'task') {
+                $f = ['inputs' => $r['inputs'], 'outputs' => $r['outputs']];
+                pm_enforce_io($f, 'task');
+                if ($f['inputs'] !== $r['inputs'] || $f['outputs'] !== $r['outputs']) $db->prepare('UPDATE nodes SET inputs=?, outputs=? WHERE id=?')->execute([$f['inputs'], $f['outputs'], $id]);
+            }
+            $walk($id, $kind);
+        }
+    };
+    $walk(0, null);
 }

@@ -2,7 +2,7 @@
 (function () {
 'use strict';
 var J = window.JAL, E = window.ENG;
-var S = { drawerOpen: false, cv: null, cvView: {}, pendingRename: 0, pendingLink: '', version: '', updAvail: false, user: null, csrf: '', needsSetup: false, projects: [], pid: 0, P: null, idx: null, sch: null,
+var S = { editing: false, snap: null, chgBase: 0, tool: null, libCount: 0, libId: 0, drawerOpen: false, cv: null, cvView: {}, pendingRename: 0, pendingLink: '', version: '', updAvail: false, user: null, csrf: '', needsSetup: false, projects: [], pid: 0, P: null, idx: null, sch: null,
   tab: 'dash', focus: 0, sel: 0, open: {}, zoom: 'week', crit: true, logNode: '', logKind: '' };
 var FA = J.fa;
 var ZOOM = { day: 26, week: 11, month: 4, quarter: 1.6 };
@@ -89,57 +89,189 @@ function route() {
   if (!S.user) return render();
   if (m) {
     var pid = +m[1]; S.tab = m[2] || 'dash';
-    if (S.pid !== pid || !S.P) { S.focus = 0; S.sel = 0; S.open = {}; return loadProject(pid).then(function () { render(); }).catch(function (e) { fail(e); location.hash = '#/'; }); }
+    if (S.pid !== pid || !S.P) { S.focus = 0; S.sel = 0; S.open = {}; S.editing = false; S.snap = null; S.tool = null; S.drawerOpen = false; return loadProject(pid).then(function () { render(); }).catch(function (e) { fail(e); location.hash = '#/'; }); }
     return render();
   }
-  S.pid = 0; S.P = null;
-  loadProjects().then(function () { render(); }).catch(fail);
+  if (S.P) flushTime();
+  S.pid = 0; S.P = null; S.editing = false;
+  loadProjects().then(function () { return api('library_list'); }).then(function (j) { S.libCount = j.modules.length; S.libId = j.library_id; render(); }).catch(fail);
 }
 function go(tab) { location.hash = '#/p/' + S.pid + '/' + tab; }
 
 /* ---------- نمایش اصلی ---------- */
 var scrollKeep = {};
+/* ---------- ثابت‌ها و کمک‌های سلسله‌مراتب ---------- */
+var KIND_ICON = { area: '🏛️', section: '📂', module: '🧩', task: '✔️' };
+var KCOL = { area: '#2f6fed', section: '#1f9d63', module: '#7a5af8', task: '#e0912b' };
+var KIND_HINT = { area: 'بخشِ کلیِ پروژه؛ فقط «بخش» و «ماژول» می‌گیرد', section: 'می‌تواند بخش، ماژول و کار داشته باشد', module: 'ابزارِ قابلِ ذخیره در کتابخانه؛ ورودی/خروجی دارد', task: 'آخرین سطح؛ یک ورودی، یک خروجی و فلوچارت' };
+function projKind() { return S.P && S.P.project.kind || 'project'; }
+function isLib() { return projKind() === 'library'; }
+function childKindsOf(kind) { /* kind=null یعنی ریشه */
+  if (kind == null) return isLib() ? ['module'] : ['area'];
+  return { area: ['section', 'module'], section: ['section', 'module', 'task'], module: ['section', 'module', 'task'] }[kind] || [];
+}
+function childKinds(parentId) { return childKindsOf(parentId ? S.idx.byId.get(parentId).kind : null); }
+function fmtDur(sec) {
+  sec = Math.round(sec || 0);
+  if (sec < 60) return FA(sec) + ' ثانیه';
+  var m = Math.floor(sec / 60), h = Math.floor(m / 60); m = m % 60;
+  return h ? FA(h) + ' ساعت' + (m ? ' و ' + FA(m) + ' دقیقه' : '') : FA(m) + ' دقیقه';
+}
+function nodeTime(id) {
+  var n = S.idx.byId.get(id); if (!n) return 0;
+  var t = n.work_seconds || 0; S.idx.descendants(id).forEach(function (d) { t += S.idx.byId.get(d).work_seconds || 0; }); return t;
+}
+function totalTime() { var t = (S.P.project.work_seconds || 0); S.P.nodes.forEach(function (n) { t += n.work_seconds || 0; }); return t; }
+function relTime(s) {
+  if (!s) return ''; var d = new Date(s.replace(' ', 'T')), diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return 'همین الان'; if (diff < 3600) return FA(Math.floor(diff / 60)) + ' دقیقه پیش'; if (diff < 86400) return FA(Math.floor(diff / 3600)) + ' ساعت پیش';
+  return FA(Math.floor(diff / 86400)) + ' روز پیش';
+}
+function needEdit() { if (S.editing) return true; toast('برای تغییر، اول «✎ ویرایش» را بزنید', true); return false; }
+
+/* ---------- حالتِ ویرایش / ذخیره / لغو ---------- */
+function startEdit() {
+  if (S.editing || !S.P) return;
+  S.editing = true; S.snap = JSON.stringify({ nodes: S.P.nodes, deps: S.P.deps, milestones: S.P.milestones });
+  S.chgBase = S.P.changes.length ? S.P.changes[0].id : 0; S.tm.act = Date.now();
+  render(true); toast('حالت ویرایش روشن شد');
+}
+function endEdit() { flushTime(); S.editing = false; S.snap = null; S.tool = null; if (S.tab === 'map') S.drawerOpen = false; }
+function saveEdit() {
+  if (!S.editing) return;
+  var since = S.P.changes.filter(function (c) { return c.id > S.chgBase; });
+  if (!since.length) { endEdit(); render(true); return toast('تغییری انجام نشده بود؛ به حالتِ مشاهده برگشتید'); }
+  var list = since.slice(0, 12).map(function (c) { return '<li>' + esc(c.action) + (c.detail ? ': ' + esc(c.detail.slice(0, 70)) : '') + (c.path ? ' <span class="mut">— ' + esc(c.path) + '</span>' : '') + '</li>'; }).join('');
+  modal({ title: '💾 ذخیرهٔ تغییرات', body: '<p>' + FA(since.length) + ' تغییر در این نوبتِ ویرایش:</p><ul class="sm" style="max-height:200px;overflow:auto">' + list + '</ul>' +
+    '<label class="f"><span>توضیحِ کوتاه برای این نسخه (اختیاری)</span><input name="note" placeholder="مثلاً: طراحیِ بخشِ پرداخت"></label>', ok: '💾 ذخیره و بستنِ ویرایش',
+    onok: function (f) {
+      var sum = since.slice(0, 8).map(function (c) { return c.action + (c.detail ? ' ' + c.detail.slice(0, 40) : ''); }).join('؛ ');
+      flushTime();
+      return api('revision_save', { project_id: S.pid, note: $('[name=note]', f).value, summary: sum }).then(function () { endEdit(); toast('ذخیره شد؛ اکنون در حالتِ مشاهده هستید'); return reload(); });
+    } });
+}
+function discardEdit() {
+  if (!S.editing) return;
+  if (!confirm('همهٔ تغییراتِ این نوبتِ ویرایش لغو شود و پروژه به حالتِ پیش از ویرایش برگردد؟\n(پیوست و یادداشتِ بخش‌هایی که در این نوبت ساخته و پاک شده‌اند از بین می‌رود.)')) return;
+  var snap = S.snap ? JSON.parse(S.snap) : null; if (!snap) return;
+  return api('project_restore', { project_id: S.pid, snapshot: snap }).then(function () { endEdit(); toast('تغییرات لغو شد'); return reload(); });
+}
+
+/* ---------- زمانِ کار ---------- */
+S.tm = { acc: 0, act: Date.now(), nid: 0 };
+function flushTime(keep) {
+  if (!S.P || !S.tm.acc) return;
+  var sec = S.tm.acc, nid = S.tm.nid || 0; S.tm.acc = 0;
+  var body = JSON.stringify({ project_id: S.pid, node_id: nid, seconds: sec });
+  try { fetch('api.php?a=time_add', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF': S.csrf }, body: body, credentials: 'same-origin', keepalive: !!keep }); } catch (e) { /* بی‌اثر */ }
+}
+function tickSec() {
+  updClock();
+  if (!(S.editing && S.P && S.user && !document.hidden && Date.now() - S.tm.act < 90000)) { updStatus(true); return; }
+  var nid = S.sel || 0;
+  if (S.tm.nid !== nid) { flushTime(); S.tm.nid = nid; }
+  S.tm.acc++;
+  if (nid) { var n = S.idx.byId.get(nid); if (n) n.work_seconds = (n.work_seconds || 0) + 1; } else S.P.project.work_seconds = (S.P.project.work_seconds || 0) + 1;
+  if (S.tm.acc >= 30) flushTime();
+  updStatus();
+}
+['mousemove', 'keydown', 'pointerdown', 'wheel', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, function () { S.tm.act = Date.now(); }, { passive: true }); });
+window.addEventListener('beforeunload', function () { flushTime(true); });
+document.addEventListener('visibilitychange', function () { if (document.hidden) flushTime(); });
+setInterval(tickSec, 1000);
+
+/* ---------- نوارِ وضعیت و ساعت ---------- */
+function nowStr() {
+  var d = new Date(), p = function (x) { return ('0' + x).slice(-2); };
+  return J.fmt(J.dayToIso(J.today()), true) + ' · ' + FA(p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()));
+}
+function updClock() { var c = $('#clock'); if (c) c.textContent = nowStr(); }
+function statusHtml() {
+  if (!S.P) return '<span class="sb-i">👤 ' + esc(S.user || '') + '</span><span class="grow"></span><span class="sb-i" id="clock">' + nowStr() + '</span>';
+  var n = S.sel ? S.idx.byId.get(S.sel) : null, ch = S.P.changes[0], parts = [];
+  parts.push('<span class="sb-mode ' + (S.editing ? 'edit' : 'view') + '">' + (S.editing ? '✎ در حال ویرایش' : '👁 فقط مشاهده') + '</span>');
+  if (n) parts.push('<span class="sb-i" title="' + esc(S.idx.pathText(n.id)) + '">' + (n.icon || KIND_ICON[n.kind]) + ' ' + esc(S.idx.pathText(n.id).slice(-60)) + '</span><span class="sb-i">⏱ این بخش: <b>' + fmtDur(nodeTime(n.id)) + '</b></span>');
+  parts.push('<span class="sb-i">🕘 کلِ زمانِ طراحی: <b>' + fmtDur(totalTime()) + '</b></span>');
+  if (ch) parts.push('<span class="sb-i grow" title="' + esc(ch.action + ' ' + ch.detail) + '">🔄 آخرین تغییر: ' + esc(ch.action) + (ch.path ? ' در «' + esc(ch.path.split(' › ').slice(-2).join(' › ')) + '»' : '') + ' <span class="mut">(' + relTime(ch.created_at) + ')</span></span>');
+  else parts.push('<span class="grow"></span>');
+  parts.push('<span class="sb-i" id="clock">' + nowStr() + '</span>');
+  return parts.join('');
+}
+function refreshMenu() { var m = $('.menubar'); if (!m) return; var open = $('.mm.open'), id = open ? open.getAttribute('data-mm') : ''; m.outerHTML = menuBar(); if (id) { var n = $('.mm[data-mm=' + id + ']'); if (n) n.classList.add('open'); } }
+function updStatus(light) {
+  var b = $('#statusbar'); if (!b) return;
+  if (light && S.P && !S.editing) { /* بدونِ ویرایش، فقط ساعت */ if (!b.innerHTML) b.innerHTML = statusHtml(); return; }
+  b.innerHTML = statusHtml();
+}
+
+/* ---------- منوی برنامه ---------- */
+function mi(icon, label, act, o) {
+  o = o || {};
+  return '<button class="mi' + (o.dis ? ' dis' : '') + '" data-act="' + act + '"' + (o.data || '') + (o.dis ? ' disabled' : '') + '><span class="mi-i">' + icon + '</span><span class="mi-t">' + label + '</span>' + (o.key ? '<span class="mi-k">' + o.key + '</span>' : '') + '</button>';
+}
+function menu(id, icon, label, items, color) {
+  return '<div class="mm" data-mm="' + id + '" style="--mc:' + color + '"><button class="mm-b" data-act="menu" data-id="' + id + '"><span class="mm-ic">' + icon + '</span> ' + label + '</button><div class="mm-pop">' + items + '</div></div>';
+}
+function menuSep() { return '<div class="mi-sep"></div>'; }
+function menuBar() {
+  var p = S.P, inP = !!p, ed = S.editing, nsel = inP && S.sel && S.idx.byId.get(S.sel), selMod = nsel && nsel.kind === 'module';
+  var m = '';
+  m += menu('file', '📁', 'پروژه',
+    mi('🆕', 'پروژهٔ جدید…', 'newproject') + mi('📂', 'فهرستِ پروژه‌ها', 'home') + mi('📥', 'ایمپورت از فایل…', 'importnew') + mi('🎬', 'پروژهٔ دمو (همهٔ امکانات)', 'sample') +
+    (inP ? menuSep() + mi('⚙️', 'تنظیمات پروژه…', 'editproject', { dis: !ed && false }) + mi('🤖', 'خروجی برای هوش مصنوعی (.pm.json)', 'exportjson') + mi('📄', 'شرحِ خوانا (Markdown)', 'exportmd') + mi('🗜️', 'پیوست‌ها (zip)', 'exportzip') : ''), '#2f6fed');
+  if (inP) m += menu('edit', '✏️', 'ویرایش',
+    mi('✎', 'شروعِ ویرایش', 'editstart', { dis: ed, key: 'Ctrl+E' }) + mi('💾', 'ذخیره و پایانِ ویرایش', 'editsave', { dis: !ed, key: 'Ctrl+S' }) + mi('↩', 'لغوِ تغییراتِ این نوبت', 'editdiscard', { dis: !ed }) +
+    menuSep() + mi('🕘', 'تاریخچهٔ تغییرات و نسخه‌ها', 'tab', { data: ' data-v="hist"' }), '#e0912b');
+  if (inP) m += menu('view', '👁', 'نما',
+    TABS.map(function (t) { return mi(t[1], t[2], 'tab', { data: ' data-v="' + t[0] + '"' }); }).join('') + menuSep() +
+    mi('🔎', 'جا دادنِ نقشه در صفحه', 'mapzoom', { data: ' data-v="fit"' }) + mi('🧹', 'بستنِ پنلِ جزئیات', 'closedrawer'), '#7a5af8');
+  m += menu('tools', '🧰', 'ابزار',
+    mi('📚', 'کتابخانهٔ ماژول‌ها', 'openlib') +
+    (inP ? mi('📥', 'درج ماژول از کتابخانه…', 'libinsert', { dis: !ed || childKinds(S.focus).indexOf('module') < 0 }) + mi('📤', 'ذخیرهٔ ماژولِ انتخاب‌شده در کتابخانه', 'savelib', { dis: !selMod }) +
+      (isLib() ? mi('🧬', 'ساختِ مشتق (ارث‌بری) از ماژولِ انتخاب‌شده', 'derive', { dis: !ed || !selMod }) : '') : ''), '#14a3a3');
+  m += menu('help', '❓', 'راهنما',
+    mi('📖', 'راهنمای سریع', 'help') + mi('⌨️', 'میان‌برها', 'shortcuts') + mi('🔄', 'به‌روزرسانی و نسخه (v' + esc(S.version) + ')', 'update') + menuSep() + mi('🔑', 'تغییر رمز', 'passwd') + mi('🚪', 'خروج', 'logout'), '#e0558a');
+  return '<header class="menubar"><div class="mb-logo" data-act="home" title="فهرستِ پروژه‌ها">🧭 <b>Milo</b></div><nav class="mb-menus">' + m + '</nav>' +
+    '<div class="mb-title">' + (inP ? (isLib() ? '📚 ' : '') + esc(p.project.name) + ' <span class="pill">' + FA(p.project.progress) + '٪</span>' : '') + '</div><div class="mb-right"><span class="mb-user">👤 ' + esc(S.user || '') + '</span></div></header>';
+}
+var TABS = [['dash', '📊', 'داشبورد', '#2f6fed'], ['map', '🗺️', 'ساختار', '#7a5af8'], ['outline', '📋', 'فهرست', '#14a3a3'], ['plan', '🧭', 'ترتیب و زمان‌بندی', '#e0912b'],
+  ['gantt', '📅', 'تایم‌لاین', '#d64545'], ['logs', '📝', 'گزارش‌ها', '#1f9d63'], ['hist', '🕘', 'تاریخچه', '#64748b'], ['ai', '🤖', 'هوش مصنوعی', '#e0558a']];
+function tabsBar() {
+  var ed = S.editing;
+  return '<nav class="tabs">' + TABS.map(function (t) { return '<div class="tab ' + (S.tab === t[0] ? 'on' : '') + '" style="--tc:' + t[3] + '" data-act="tab" data-v="' + t[0] + '"><span class="tab-i">' + t[1] + '</span> ' + t[2] + '</div>'; }).join('') +
+    '<span class="grow"></span>' + (ed ? '<span class="pill s st-doing">✎ در حال ویرایش</span><button class="btn okb" data-act="editsave">💾 ذخیره</button><button class="btn" data-act="editdiscard">↩ لغو</button>' :
+      '<button class="btn eb" data-act="editstart" title="Ctrl+E">✎ ویرایش</button>') + '</nav>';
+}
+
+/* ---------- نمایشِ اصلی ---------- */
 function render(keep) {
   var app = $('#app');
   if (!S.user) { app.innerHTML = authView(); return; }
-  if (!S.P) { app.innerHTML = homeView(); return; }
-  if (!$('#content')) {
-    app.innerHTML = shell();
-  } else {
-    $('.top', app).outerHTML = topBar(); $('.tabs', app).outerHTML = tabsBar();
-  }
-  renderContent(keep); renderDrawer();
+  if (!S.P) { app.innerHTML = homeView(); updStatus(); return; }
+  if (!$('#content')) app.innerHTML = shell();
+  else { $('.menubar', app).outerHTML = menuBar(); $('.tabs', app).outerHTML = tabsBar(); }
+  renderContent(keep); renderDrawer(); updStatus();
 }
-function shell() { return topBar() + tabsBar() + '<div class="main"><section id="content"></section><aside id="drawer" class="hidden"></aside></div>'; }
-function topBar() {
-  var p = S.P.project;
-  return '<header class="top"><button class="btn ghost" data-act="home">→ پروژه‌ها</button><h1>' + esc(p.name) + '</h1>' +
-    '<span class="pill">' + FA(p.progress) + '٪</span><span class="sp"></span>' +
-    '<button class="btn sm" data-act="update">به‌روزرسانی' + (S.updAvail ? ' <span class="dot" style="background:var(--bad)"></span>' : '') + ' <span class="mut">v' + esc(S.version) + '</span></button>' + '<button class="btn sm" data-act="editproject">تنظیمات پروژه</button></header>';
-}
-var TABS = [['dash', 'داشبورد'], ['map', 'نقشهٔ ساختار'], ['outline', 'فهرست و ویرایش'], ['plan', 'ترتیب و زمان‌بندی'], ['gantt', 'تایم‌لاین'], ['logs', 'گزارش‌ها'], ['ai', 'هوش مصنوعی و خروجی']];
-function tabsBar() {
-  return '<nav class="tabs">' + TABS.map(function (t) { return '<div class="tab ' + (S.tab === t[0] ? 'on' : '') + '" data-act="tab" data-v="' + t[0] + '">' + t[1] + '</div>'; }).join('') + '</nav>';
-}
+function shell() { return menuBar() + tabsBar() + '<div class="main"><section id="content"></section><aside id="drawer" class="hidden"></aside></div><footer id="statusbar" class="statusbar"></footer>'; }
 function renderContent(keep) {
   var c = $('#content'); if (!c) return;
   var mn = $('.main'); if (mn) mn.classList.toggle('overlay', S.tab === 'map');
   var sc = {};
   if (keep) { $$('[data-sk]', c).forEach(function (e) { sc[e.getAttribute('data-sk')] = [e.scrollLeft, e.scrollTop]; }); sc.win = window.scrollY; }
-  var fn = { dash: dashView, map: mapView, outline: outlineView, plan: planView, gantt: ganttView, logs: logsView, ai: aiView }[S.tab] || dashView;
+  var fn = { dash: dashView, map: mapView, outline: outlineView, plan: planView, gantt: ganttView, logs: logsView, hist: histView, ai: aiView }[S.tab] || dashView;
   c.innerHTML = fn();
   if (keep) { $$('[data-sk]', c).forEach(function (e) { var s = sc[e.getAttribute('data-sk')]; if (s) { e.scrollLeft = s[0]; e.scrollTop = s[1]; } }); window.scrollTo(0, sc.win || 0); }
   if (S.tab === 'gantt' && !keep) { var g = $('.gscroll'); if (g && S._gToday != null) g.scrollLeft = Math.max(0, S._gToday - 160); }
   if (S.tab === 'ai') bindAi();
   if (S.tab === 'map') mountMap();
+  var tb = $('.tabs'); if (tb) tb.outerHTML = tabsBar();
 }
 function selectNode(id, focusToo) {
   S.sel = id;
   if (focusToo != null) S.focus = focusToo;
-  renderContent(true); renderDrawer();
+  renderContent(true); renderDrawer(); updStatus();
 }
 
-/* ---------- ورود ---------- */
 function authView() {
   var setup = S.needsSetup;
   return '<div class="auth card"><h1>مدیر پروژه</h1><p class="mut">' + (setup ? 'نخستین اجرا: یک نام کاربری و رمز بسازید.' : 'برای ادامه وارد شوید.') + '</p>' +
@@ -149,24 +281,21 @@ function authView() {
 }
 
 /* ---------- خانه ---------- */
-function homeTop() {
-  return '<header class="top"><h1>مدیر پروژه</h1><span class="sp"></span><span class="mut sm">' + esc(S.user) + '</span>' + '<button class="btn sm" data-act="update">به‌روزرسانی' + (S.updAvail ? ' <span class="dot" style="background:var(--bad)"></span>' : '') + ' <span class="mut">v' + esc(S.version) + '</span></button>' +
-    '<button class="btn sm" data-act="passwd">تغییر رمز</button><button class="btn sm" data-act="logout">خروج</button></header>';
-}
 function homeView() {
   var cards = S.projects.map(function (p) {
-    return '<div class="card pcard" data-act="open" data-id="' + p.id + '"><h3>' + esc(p.name) + '</h3>' +
+    return '<div class="card pcard" data-act="open" data-id="' + p.id + '"><h3>🗂️ ' + esc(p.name) + '</h3>' +
       '<div class="mut sm" style="min-height:22px">' + esc((p.description || '').slice(0, 90)) + '</div>' +
       '<div class="row" style="margin:8px 0 4px"><div class="grow">' + bar(p.progress, p.progress >= 100 ? 'ok' : '') + '</div><b>' + FA(p.progress) + '٪</b></div>' +
-      '<div class="row sm mut"><span>' + FA(p.node_count) + ' بخش</span><span>·</span><span>' + FA(p.leaf_done) + '/' + FA(p.leaf_count) + ' کار انجام‌شده</span>' +
+      '<div class="row sm mut"><span>' + FA(p.node_count) + ' بخش</span><span>·</span><span>' + FA(p.leaf_done) + '/' + FA(p.leaf_count) + ' کار</span><span>·</span><span>⏱ ' + fmtDur(p.work_total) + '</span>' +
       (p.target_date ? '<span>·</span><span>هدف: ' + J.fmt(p.target_date) + '</span>' : '') + '</div></div>';
   }).join('');
-  return homeTop() +
-    '<div class="wrap"><div class="row" style="margin-bottom:14px"><h2 class="sec grow" style="margin:0">پروژه‌ها</h2>' +
-    '<button class="btn" data-act="sample">پروژهٔ دمو (همهٔ امکانات)</button><button class="btn" data-act="importnew">ایمپورت از فایل…</button>' +
-    '<button class="btn pri" data-act="newproject">+ پروژهٔ جدید</button></div>' +
-    (cards ? '<div class="grid">' + cards + '</div>' : '<div class="card empty">هنوز پروژه‌ای ندارید.<br>با «پروژهٔ جدید» شروع کنید یا «پروژهٔ نمونه» را ببینید.</div>') + '</div>';
+  return menuBar() + '<div class="wrap"><div class="card libcard" data-act="openlib"><span class="lc-i">📚</span><div class="grow"><h3>کتابخانهٔ ماژول‌ها</h3><div class="mut sm">ماژول‌هایی که یک‌بار تعریف می‌کنید و در همهٔ پروژه‌ها (با امکانِ ارث‌بری و تغییر) به کار می‌برید. ' + FA(S.libCount || 0) + ' ماژول</div></div><span class="btn">باز کردن ←</span></div>' +
+    '<div class="row" style="margin:14px 0"><h2 class="sec grow" style="margin:0">🗂️ پروژه‌ها</h2>' +
+    '<button class="btn" data-act="sample">🎬 پروژهٔ دمو (همهٔ امکانات)</button><button class="btn" data-act="importnew">📥 ایمپورت از فایل…</button>' +
+    '<button class="btn pri" data-act="newproject">🆕 پروژهٔ جدید</button></div>' +
+    (cards ? '<div class="grid">' + cards + '</div>' : '<div class="card empty">هنوز پروژه‌ای ندارید.<br>با «پروژهٔ جدید» شروع کنید یا «پروژهٔ دمو» را ببینید.</div>') + '</div><footer id="statusbar" class="statusbar"></footer>';
 }
+
 function projectForm(p, full) {
   p = p || {};
   return '<label class="f"><span>نام پروژه</span><input name="name" value="' + esc(p.name || '') + '" required></label>' +
@@ -206,52 +335,66 @@ function dashView() {
     var v = sch.info.get(id), n = idx.byId.get(id);
     return '<div data-act="pick" data-id="' + id + '"><span class="grow t">' + esc(n.title) + '</span><span style="width:110px">' + bar(v ? v.progress : 0) + '</span><b class="sm" style="width:40px">' + FA(v ? v.progress : 0) + '٪</b></div>';
   }).join('');
+  var chgList = P.changes.slice(0, 6).map(chgRow).join('') || '<div class="mut">—</div>';
   var rec = P.logs.slice(0, 8).map(function (l) {
     var n = l.node_id ? idx.byId.get(l.node_id) : null;
     return '<div data-act="' + (n ? 'pick' : 'noop') + '" data-id="' + (l.node_id || 0) + '"><span class="pill">' + (l.kind === 'ai_report' ? 'AI' : 'یادداشت') + '</span><span class="grow t sm">' + esc((l.body || '').slice(0, 70)) + '</span><span class="mut sm">' + esc(n ? n.title : '') + '</span></div>';
   }).join('');
-  if (!P.nodes.length) return '<div class="card empty">پروژه خالی است. اولین بخش را اضافه کنید، یا از «ایمپورت» فایلِ ساختار بیاورید.<br><br><button class="btn pri" data-act="addnode" data-parent="0">+ افزودن اولین بخش</button></div>';
+  if (!P.nodes.length) return '<div class="card empty">پروژه خالی است. اولین بخش را اضافه کنید، یا از «ایمپورت» فایلِ ساختار بیاورید.<br><br><button class="btn pri" data-act="addnode" data-parent="0">＋ افزودن اولین بخشِ کلی</button></div>';
   return '<div class="kpis">' +
     '<div class="card kpi"><b>' + FA(sch.root.progress) + '٪</b><span>پیشرفت کل (وزن‌دهی‌شده با زمان)</span>' + bar(sch.root.progress, sch.root.progress >= 100 ? 'ok' : '') + '</div>' +
     '<div class="card kpi"><b>' + FA(sch.root.done) + ' / ' + FA(sch.root.leaves) + '</b><span>کارِ انجام‌شده از کل</span></div>' +
     '<div class="card kpi"><b>' + num(sch.root.total) + ' روز</b><span>مجموع کار (برآورد/نهایی)</span></div>' +
+    '<div class="card kpi"><b>⏱ ' + fmtDur(totalTime()) + '</b><span>زمانِ صرف‌شده برای طراحیِ این پروژه</span></div>' +
     '<div class="card kpi"><b class="' + (late ? 'crit' : '') + '">' + (projEnd ? J.fmt(projEnd, true) : '—') + '</b><span>پایانِ پیش‌بینی‌شده' + (tgt != null ? ' · هدف: ' + J.fmt(p.target_date, true) + (late ? ' ⚠ دیرتر از هدف' : ' ✓') : '') + '</span></div></div>' +
     '<div class="card" style="margin-bottom:14px"><div class="stack">' + stack + '</div><div class="legend" style="margin-top:8px">' + legend + '</div></div>' +
     '<div class="two"><div class="card"><h2 class="sec">گام بعدی <span class="mut sm">(پیش‌نیازهایش انجام شده)</span></h2><div class="list">' + (ready.map(nodeLink).join('') || '<div class="mut">—</div>') + '</div>' +
     '<h2 class="sec">عقب‌افتاده</h2><div class="list">' + (over.map(nodeLink).join('') || '<div class="mut">مورد عقب‌افتاده‌ای نیست ✓</div>') + '</div></div>' +
     '<div class="card"><h2 class="sec">بخش‌های اصلی</h2><div class="list">' + tops + '</div>' +
     '<h2 class="sec">نقاط عطف پیش رو</h2><div class="list">' + (ms.map(function (m) { return '<div data-act="tab" data-v="gantt"><span>◆</span><span class="grow t">' + esc(m.title) + '</span><span class="mut sm">' + (m.date ? J.fmt(m.date, true) : '') + '</span></div>'; }).join('') || '<div class="mut">—</div>') + '</div>' +
-    '<h2 class="sec">آخرین گزارش‌ها</h2><div class="list">' + (rec || '<div class="mut">—</div>') + '</div></div></div>' +
+    '<h2 class="sec">🔄 آخرین تغییرات</h2><div class="list chglist">' + chgList + '</div><h2 class="sec">آخرین گزارش‌ها</h2><div class="list">' + (rec || '<div class="mut">—</div>') + '</div></div></div>' +
     (sch.cycle ? '<p class="crit">⚠ در وابستگی‌ها چرخه وجود دارد؛ زمان‌بندی دقیق نیست.</p>' : '');
 }
 
-/* ---------- نقشهٔ ساختار (بومِ گرافیکی) ---------- */
-var CW = 232, CH = 118, KCOL = { section: '#64748b', module: '#7a5af8', task: '#e0912b' };
-var ICONS = ['📦', '🧩', '⚙️', '🔐', '👤', '🛒', '💳', '📊', '🗄️', '🌐', '📱', '🔔', '📧', '🔍', '🧪', '🚀', '🎨', '📝', '🔗', '⭐'];
+/* ---------- نقشهٔ ساختار (بومِ گرافیکی با سطح‌بندی) ---------- */
+var ICONS = ['📦', '🧩', '⚙️', '🔐', '👤', '🛒', '💳', '📊', '🗄️', '🌐', '📱', '🔔', '📧', '🔍', '🧪', '🚀', '🎨', '📝', '🔗', '⭐', '🏗️', '🛍️', '📋', '🧺', '🛡️', '📈', '🔧', '💬'];
+var KSIZE = { area: { w: 300, h: 160 }, section: { w: 280, h: 140 }, module: { w: 280, h: 140 }, task: { w: 250, h: 112 } };
 function nodeColor(n) { return n.color || KCOL[n.kind]; }
+function portTop(n) { return n.kind === 'task' ? 64 : 78; }
+function blockDims(n) {
+  var b = KSIZE[n.kind] || KSIZE.module, rows = Math.min(8, Math.max((n.inputs || []).length, (n.outputs || []).length));
+  return { w: b.w, h: Math.max(b.h, portTop(n) + rows * 22 + 54) };
+}
+function blockPorts(n) {
+  var top = portTop(n), mk = function (list) { return (list || []).slice(0, 8).map(function (p, i) { return { name: p.name, y: top + i * 22 + 11 }; }); };
+  return { 'in': mk(n.inputs), out: mk(n.outputs) };
+}
 function blockHtml(n, v, ghost) {
-  var idx = S.idx, kc = idx.children(n.id).length, st = v.status || n.status, pr = v.progress != null ? v.progress : n.progress, meta = [];
-  if (kc) meta.push('▸ ' + FA(kc) + ' زیربخش');
-  if ((n.inputs || []).length) meta.push('⇢ ' + FA(n.inputs.length));
-  if ((n.outputs || []).length) meta.push('⇠ ' + FA(n.outputs.length));
+  var idx = S.idx, kc = idx.children(n.id).length, st = v.status || n.status, pr = v.progress != null ? v.progress : n.progress, meta = [], top = portTop(n);
+  if (kc) meta.push('▸ ' + FA(kc) + ' زیرمجموعه');
   if (n.flow && n.flow.nodes && n.flow.nodes.length) meta.push('⎇ فلوچارت');
-  return '<div class="bk st-' + st + '"><div class="bk-h"><span class="bk-i">' + esc(n.icon || (n.kind === 'task' ? '✔️' : n.kind === 'module' ? '🧩' : '📁')) + '</span><span class="bk-k">' + E.KIND[n.kind] + (ghost ? ' · بیرونی' : '') + '</span><span class="bk-s">' + (v.crit && S.crit ? '<b class="crit">بحرانی</b> ' : '') + E.STATUS[st] + '</span></div>' +
-    '<div class="bk-t">' + esc(n.title) + '</div><div class="bk-m">' + (meta.join(' · ') || esc((n.summary || '').slice(0, 44)) || '&nbsp;') + '</div>' +
-    '<div class="bk-p"><i style="width:' + pr + '%"></i></div><span class="bk-n">' + FA(pr) + '٪</span></div>';
+  if (n.src_name) meta.push('📚 ' + esc(n.src_name));
+  var t = nodeTime(n.id); if (t >= 60) meta.push('⏱ ' + fmtDur(t));
+  var pi = (n.inputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-pi" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
+  var po = (n.outputs || []).slice(0, 8).map(function (p, i) { return '<span class="bk-po" style="top:' + (top + i * 22) + 'px" title="' + esc(p.desc || p.name) + '">' + esc(p.name) + '</span>'; }).join('');
+  return '<div class="bk kk-' + n.kind + ' st-' + st + '"><div class="bk-h"><span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><span class="bk-k">' + E.KIND[n.kind] + (ghost ? ' · بیرونی' : '') + '</span>' +
+    '<span class="bk-s">' + (v.crit && S.crit ? '<b class="crit">بحرانی</b> ' : '') + E.STATUS[st] + '</span></div><div class="bk-t">' + esc(n.title) + '</div>' + pi + po +
+    '<div class="bk-m">' + (meta.join(' · ') || '&nbsp;') + '</div><div class="bk-p"><i style="width:' + pr + '%"></i></div></div>';
 }
 /* چیدمانِ لایه‌ای (پیش‌نیازها راست، پس‌نیازها چپ) برای بلوک‌هایی که هنوز جایگاهِ ثبت‌شده ندارند */
-function autoLayout(kids, edges) {
+function autoLayout(kids, edges, dims) {
   var preds = {}; kids.forEach(function (k) { preds[k] = []; });
   edges.forEach(function (e) { if (preds[e.b] && preds[e.a]) preds[e.b].push(e.a); });
   var layer = {}, vis = {};
   function lay(n) { if (layer[n] != null) return layer[n]; if (vis[n]) return 0; vis[n] = 1; var m = 0; preds[n].forEach(function (p) { m = Math.max(m, lay(p) + 1); }); vis[n] = 0; layer[n] = m; return m; }
   kids.forEach(lay);
   var cols = {}; kids.forEach(function (k) { (cols[layer[k]] = cols[layer[k]] || []).push(k); });
-  var pos = {}, GX = 110, GY = 36, tall = 0; Object.keys(cols).forEach(function (c) { tall = Math.max(tall, cols[c].length); });
-  var H = tall * CH + (tall - 1) * GY;
-  Object.keys(cols).forEach(function (c) {
-    var list = cols[c], h = list.length * CH + (list.length - 1) * GY, y0 = (H - h) / 2;
-    list.forEach(function (k, i) { pos[k] = { x: -c * (CW + GX), y: y0 + i * (CH + GY) }; });
+  var pos = {}, GX = 120, GY = 40, xoff = 0, ks = Object.keys(cols).map(Number).sort(function (a, b) { return a - b; });
+  var colH = {}; ks.forEach(function (c) { colH[c] = cols[c].reduce(function (s, k) { return s + dims[k].h; }, 0) + (cols[c].length - 1) * GY; });
+  var H = Math.max.apply(null, ks.map(function (c) { return colH[c]; }).concat([0]));
+  ks.forEach(function (c) {
+    var list = cols[c], w = Math.max.apply(null, list.map(function (k) { return dims[k].w; })), y = (H - colH[c]) / 2;
+    xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += GX;
   });
   return pos;
 }
@@ -275,88 +418,115 @@ function mapModel(forceAuto) {
     else if (a.ghost && b.card) { A = 'g' + a.ghost; B = String(b.card); ghosts[a.ghost] = 'in'; }
     else if (a.card && b.ghost) { A = String(a.card); B = 'g' + b.ghost; ghosts[b.ghost] = ghosts[b.ghost] || 'out'; }
     else return;
-    var k = A + '>' + B, e = edges[k] = edges[k] || { a: A, b: B, labels: [], real: null, src: ea };
-    if (ea === d.from_id && eb === d.to_id) e.real = d; else if (d.label && e.labels.indexOf(d.label) < 0) e.labels.push(d.label);
+    var exact = ea === d.from_id && eb === d.to_id, k = exact ? A + '>' + B + '>' + d.id : A + '>' + B;
+    var e = edges[k] = edges[k] || { a: A, b: B, labels: [], real: null, src: ea };
+    if (exact) e.real = d; else if (d.label && e.labels.indexOf(d.label) < 0) e.labels.push(d.label);
   });
-  var kidIds = kids.map(String), auto = autoLayout(kidIds, Object.keys(edges).map(function (k) { return edges[k]; }));
+  var kidIds = kids.map(String), dims = {};
+  kids.forEach(function (id) { dims[String(id)] = blockDims(idx.byId.get(id)); });
+  var auto = autoLayout(kidIds, Object.keys(edges).map(function (k) { return edges[k]; }), dims);
   var items = [], minx = 1e9, maxx = -1e9, miny = 1e9;
   kids.forEach(function (id) {
-    var n = idx.byId.get(id), v = sch.info.get(id) || {}, a = auto[String(id)];
+    var n = idx.byId.get(id), v = sch.info.get(id) || {}, a = auto[String(id)], d = dims[String(id)];
     var x = n.x != null && !forceAuto ? n.x : a.x, y = n.y != null && !forceAuto ? n.y : a.y;
-    minx = Math.min(minx, x); maxx = Math.max(maxx, x + CW); miny = Math.min(miny, y);
-    items.push({ id: String(id), x: x, y: y, w: CW, h: CH, shape: 'card', color: nodeColor(n), html: blockHtml(n, v), text: n.title, node: n });
+    minx = Math.min(minx, x); maxx = Math.max(maxx, x + d.w); miny = Math.min(miny, y);
+    items.push({ id: String(id), x: x, y: y, w: d.w, h: d.h, shape: 'card', cls: 'kk-' + n.kind, color: nodeColor(n), html: blockHtml(n, v), text: n.title, node: n, ports: blockPorts(n) });
   });
   var gi = 0, go = 0;
   Object.keys(ghosts).forEach(function (g) {
-    var n = idx.byId.get(+g), v = sch.info.get(+g) || {}, inn = ghosts[g] === 'in';
-    items.push({ id: 'g' + g, x: inn ? maxx + 120 : minx - CW - 120, y: miny + (inn ? gi++ : go++) * (CH + 30), w: CW, h: CH, shape: 'card', color: nodeColor(n), html: blockHtml(n, v, true), text: n.title, ghost: true, node: n });
+    var n = idx.byId.get(+g), v = sch.info.get(+g) || {}, inn = ghosts[g] === 'in', d = blockDims(n), yy = miny + (inn ? gi++ : go++) * (d.h + 36);
+    items.push({ id: 'g' + g, x: inn ? maxx + 140 : minx - d.w - 140, y: yy, w: d.w, h: d.h, shape: 'card', cls: 'kk-' + n.kind, color: nodeColor(n), html: blockHtml(n, v, true), text: n.title, ghost: true, node: n, ports: blockPorts(n) });
   });
   var links = Object.keys(edges).map(function (k) {
-    var e = edges[k], sn = idx.byId.get(e.src), col = sn ? nodeColor(sn) : null;
-    return e.real ? { id: 'd' + e.real.id, from: e.a, to: e.b, label: e.real.label || '', color: col, dep: e.real }
-      : { id: 'a' + k, from: e.a, to: e.b, label: e.labels.join('، '), color: col, dashed: true, locked: true };
+    var e = edges[k], sn = idx.byId.get(e.src), col = sn ? nodeColor(sn) : null, d = e.real;
+    if (d) {
+      var lab = d.label || (d.out_name && d.in_name ? d.out_name + ' ← ' + d.in_name : (d.out_name || d.in_name || ''));
+      return { id: 'd' + d.id, from: e.a, to: e.b, fromPort: d.out_name || null, toPort: d.in_name || null, label: lab, color: col, dep: d };
+    }
+    return { id: 'a' + k, from: e.a, to: e.b, label: e.labels.join('، '), color: col, dashed: true, locked: true };
   });
   return { items: items, links: links, kids: kids };
 }
+
+function toolBtn(kind, label, icon, allowed, armed) {
+  var off = !S.editing || !allowed;
+  return '<button class="tool' + (armed ? ' armed' : '') + (off ? ' off' : '') + '" data-act="tool" data-kind="' + kind + '"' + (off ? ' data-off="1"' : '') + ' style="--tc:' + (KCOL[kind] || '#14a3a3') + '" title="' + (allowed ? (S.editing ? esc(KIND_HINT[kind] || label) : 'برای ساختن، اول «ویرایش» را بزنید') : 'در این سطح مجاز نیست') + '"><span class="tool-i">' + icon + '</span><span>' + label + '</span></button>';
+}
 function mapView() {
-  var idx = S.idx, focus = S.focus, fchain = focus ? idx.chain(focus) : [];
-  var crumbs = '<a data-act="focus" data-id="0">ریشهٔ پروژه</a>' + fchain.map(function (id) { return '<span class="mut">›</span><a data-act="focus" data-id="' + id + '">' + esc(idx.byId.get(id).title) + '</a>'; }).join('');
-  var tools = '<div class="mtools"><button class="btn sm pri" data-act="mapadd" data-kind="module">＋ ماژول</button><button class="btn sm" data-act="mapadd" data-kind="section">＋ بخش کلی</button><button class="btn sm" data-act="mapadd" data-kind="task">＋ کار/جزئیات</button>' +
-    '<span class="grow"></span><button class="btn sm" data-act="maplayout" title="چیدمانِ خودکار بر پایهٔ وابستگی">✨ چیدمان خودکار</button><button class="btn sm" data-act="mapzoom" data-v="out">－</button><button class="btn sm" data-act="mapzoom" data-v="fit">جا بده</button><button class="btn sm" data-act="mapzoom" data-v="in">＋</button>' +
-    (focus ? '<button class="btn sm" data-act="pick" data-id="' + focus + '">جزئیاتِ این بخش</button>' : '') + '</div>';
-  var tip = idx.children(focus).length ? '' : '<div class="cv-hint">بومِ خالی است.<br>روی بوم <b>دوبار کلیک</b> کنید یا از نوارِ بالا یک بلوک اضافه کنید.</div>';
-  return '<div class="crumbs">' + crumbs + '</div>' + tools + '<div class="cvwrap"><div id="cvhost" class="cvhost"></div>' + tip + '</div>' +
-    '<p class="mut sm">دوبار کلیک روی بوم = بلوکِ تازه · دوبار کلیک روی بلوک = بازکردنِ زیرمجموعه · از نقطه‌های کنارِ بلوک بکشید و روی بلوکِ دیگر رها کنید = پیوند (روی جای خالی رها کنید = بلوکِ تازهٔ متصل) · کلیک روی بلوک/پیکان = رنگ و ابزار · ' +
-    'خط‌چین‌ها = وابستگیِ بین زیرمجموعه‌ها یا بخش‌های بیرون از این سطح · چرخ ماوس = زوم، کشیدنِ پس‌زمینه = جابه‌جایی، Shift+کشیدن = انتخابِ چندتایی.</p>';
+  var idx = S.idx, focus = S.focus, node = focus ? idx.byId.get(focus) : null, fchain = focus ? idx.chain(focus) : [];
+  var rootName = isLib() ? '📚 کتابخانه' : '🏠 ریشهٔ پروژه';
+  var crumbs = '<a data-act="focus" data-id="0">' + rootName + '</a>' + fchain.map(function (id) { var n = idx.byId.get(id); return '<span class="mut">›</span><a data-act="focus" data-id="' + id + '">' + (n.icon || KIND_ICON[n.kind]) + ' ' + esc(n.title) + '</a>'; }).join('');
+  if (node && node.kind === 'task') return '<div class="crumbs">' + crumbs + '</div>' + taskPage(node);
+  var ck = childKinds(focus);
+  var tools = '<div class="mtools"><span class="mt-lbl">ابزارها:</span>' + ['area', 'section', 'module', 'task'].map(function (k) { return toolBtn(k, E.KIND[k], KIND_ICON[k], ck.indexOf(k) >= 0, S.tool === k); }).join('') +
+    toolBtn('lib', 'از کتابخانه', '📚', ck.indexOf('module') >= 0, S.tool === 'lib') +
+    '<span class="grow"></span><button class="btn sm" data-act="maplayout"' + (S.editing ? '' : ' disabled') + ' title="چیدمانِ خودکار بر پایهٔ وابستگی">✨ چیدمان خودکار</button><button class="btn sm" data-act="mapzoom" data-v="out">－</button><button class="btn sm" data-act="mapzoom" data-v="fit">جا بده</button><button class="btn sm" data-act="mapzoom" data-v="in">＋</button>' +
+    (focus ? '<button class="btn sm" data-act="pick" data-id="' + focus + '">📝 جزئیاتِ این بخش</button>' : '') + '</div>';
+  var rule = '<div class="rule">' + (node ? KIND_ICON[node.kind] + ' ' + E.KIND[node.kind] + ': ' : '🏠 سطحِ اصلی: ') + (ck.length ? 'اینجا می‌توانید بسازید ← ' + ck.map(function (k) { return KIND_ICON[k] + ' ' + E.KIND[k]; }).join('، ') : 'هیچ زیرمجموعه‌ای مجاز نیست') +
+    (S.editing ? '' : ' <span class="pill s st-hold">حالتِ مشاهده — برای تغییر «✎ ویرایش» را بزنید</span>') + '</div>';
+  var tip = idx.children(focus).length ? '' : '<div class="cv-hint">' + (S.editing ? 'بوم خالی است.<br>یک ابزار را از نوارِ بالا بردارید و روی بوم کلیک کنید (یا بکشید و رها کنید).' : 'اینجا هنوز چیزی نیست.<br>برای ساختن «✎ ویرایش» را بزنید.') + '</div>';
+  return '<div class="crumbs">' + crumbs + '</div>' + tools + rule + '<div class="cvwrap"><div id="cvhost" class="cvhost' + (S.tool ? ' armed' : '') + '"></div>' + tip + '</div>' +
+    '<p class="mut sm">دوبار کلیک روی بلوک = بازکردنِ زیرمجموعه · از دایره‌های کنارِ بلوک (سبز = ورودی، نارنجی = خروجی) بکشید و روی دایرهٔ بلوکِ دیگر رها کنید = اتصالِ خروجی به ورودی · ' +
+    'کلیک روی بلوک/پیکان = رنگ و ابزار · چرخ ماوس = زوم · کشیدنِ پس‌زمینه = جابه‌جایی · Shift+کشیدن = انتخابِ چندتایی. خط‌ها از میانِ بلوک‌ها رد نمی‌شوند.</p>';
 }
 function rawId(id) { return +String(id).replace(/^g/, ''); }
-function createBlock(pt, kind, srcId) {
-  var parent = S.focus || null;
-  return api('node_save', { project_id: S.pid, title: 'بلوک جدید', kind: kind || (S.focus && S.idx.byId.get(S.focus).kind === 'section' ? 'module' : (S.focus ? 'task' : 'module')),
-    parent_id: parent, x: Math.round(pt.x - CW / 2), y: Math.round(pt.y - CH / 2) }).then(function (r) {
-    var p = srcId ? api('dep_save', { project_id: S.pid, from_id: srcId, to_id: r.id, label: '' }) : Promise.resolve();
-    return p.then(function () { S.sel = r.id; S.pendingRename = r.id; return reload(); });
+function createBlock(pt, kind, srcId, srcPort) {
+  var ck = childKinds(S.focus || 0); kind = kind || ck[0];
+  if (ck.indexOf(kind) < 0) return toast('«' + E.KIND[kind] + '» در این سطح مجاز نیست', true);
+  var d = KSIZE[kind];
+  return api('node_save', { project_id: S.pid, title: 'بلوک جدید', kind: kind, parent_id: S.focus || null, x: Math.round(pt.x - d.w / 2), y: Math.round(pt.y - d.h / 2) }).then(function (r) {
+    var p = srcId ? api('dep_save', { project_id: S.pid, from_id: srcId, to_id: r.id, label: '', out_name: srcPort || '' }) : Promise.resolve();
+    return p.then(function () { S.sel = r.id; S.pendingRename = r.id; S.tool = null; return reload(); });
   });
 }
 function mountMap() {
   var host = $('#cvhost'); if (!host) return;
   var key = String(S.focus), m = mapModel(), fresh = !S.cvView[key];
-  var cv = S.cv = PMCanvas.create(host, { id: 'map', view: S.cvView[key],
+  var cv = S.cv = PMCanvas.create(host, { id: 'map', view: S.cvView[key], readonly: !S.editing,
     onView: function (v) { S.cvView[key] = v; },
-    onSelect: function (it, lk) { var id = it ? rawId(it.id) : 0; if (id !== S.sel && !lk) { S.sel = id; if (!id) S.drawerOpen = false; renderDrawer(); } },
+    onSelect: function (it, lk) { var id = it ? rawId(it.id) : 0; if (id !== S.sel && !lk) { S.sel = id; if (!id) S.drawerOpen = false; renderDrawer(); updStatus(); refreshMenu(); } },
     onMove: function (list) {
       var items = list.map(function (x) { var n = S.idx.byId.get(+x.id); if (n) { n.x = x.x; n.y = x.y; } return { id: +x.id, x: x.x, y: x.y }; });
       api('nodes_bulk', { project_id: S.pid, items: items }).catch(fail);
     },
-    onAdd: guard(function (pt) { return createBlock(pt); }),
-    onConnectNew: guard(function (src, pt) { return createBlock(pt, null, rawId(src.id)); }),
-    onConnect: guard(function (a, b) {
+    onAdd: guard(function (pt) { var ck = childKinds(S.focus || 0); if (!ck.length) return; return createBlock(pt, S.tool && S.tool !== 'lib' ? S.tool : (ck.indexOf('module') >= 0 ? 'module' : ck[0])); }),
+    onPlace: guard(function (tool, pt) { if (tool === 'lib') { return libPicker(function (mod) { return insertFromLib(mod.id, pt); }); } return createBlock(pt, tool); }),
+    onDisarm: function () { S.tool = null; cv.arm(null); renderContent(true); },
+    onConnectNew: guard(function (src, pt, port) { var ck = childKinds(S.focus || 0); if (!ck.length) return; return createBlock(pt, ck.indexOf('module') >= 0 ? 'module' : ck[0], rawId(src.id), port); }),
+    onConnect: guard(function (a, b, pa, pb) {
       var f = rawId(a.id), t = rawId(b.id);
-      return api('dep_save', { project_id: S.pid, from_id: f, to_id: t, label: '' }).then(function () { return loadProject(S.pid); }).then(function () {
-        var d = S.P.deps.filter(function (x) { return x.from_id === f && x.to_id === t; })[0]; if (d) S.pendingLink = 'd' + d.id; render(true);
+      return api('dep_save', { project_id: S.pid, from_id: f, to_id: t, label: '', out_name: pa || '', in_name: pb || '' }).then(function () { return loadProject(S.pid); }).then(function () {
+        var d = S.P.deps.filter(function (x) { return x.from_id === f && x.to_id === t && (x.out_name || '') === (pa || '') && (x.in_name || '') === (pb || ''); })[0];
+        if (d && !pa && !pb) S.pendingLink = 'd' + d.id; render(true);
       });
     }),
     onRename: guard(function (it, text) { text = (text || '').trim(); if (!text || text === it.node.title) return; return api('node_save', { project_id: S.pid, id: rawId(it.id), title: text }).then(reload); }),
-    onColor: guard(function (it, c) { var n = it.node; n.color = c; var p = api('node_save', { project_id: S.pid, id: n.id, color: c || '' }); S.cv.setData(mapModel().items, mapModel().links, true); return p; }),
+    onColor: guard(function (it, c) { var n = it.node; n.color = c; var p = api('node_save', { project_id: S.pid, id: n.id, color: c || '' }); var mm = mapModel(); S.cv.setData(mm.items, mm.links, true); return p; }),
     onDelete: guard(function (ids) {
       if (!ids.length) return;
       var extra = 0; ids.forEach(function (i) { extra += S.idx.descendants(rawId(i)).length; });
       if (!confirm(FA(ids.length) + ' بلوک' + (extra ? ' و ' + FA(extra) + ' زیرمجموعه‌شان' : '') + ' (با گزارش‌ها و پیوست‌ها) پاک شود؟')) return;
       return Promise.all(ids.map(function (i) { return api('node_delete', { project_id: S.pid, id: rawId(i) }); })).then(function () { S.sel = 0; return reload(); });
     }),
-    onOpen: function (it) { var id = rawId(it.id); S.sel = id; S.focus = it.ghost ? S.idx.parentOf(id) : id; renderContent(); renderDrawer(); },
-    onLinkLabel: guard(function (l, text) { if (!l.dep) return; return api('dep_save', { project_id: S.pid, from_id: l.dep.from_id, to_id: l.dep.to_id, label: text }).then(reload); }),
+    onOpen: function (it) { var id = rawId(it.id); S.sel = id; S.focus = it.ghost ? S.idx.parentOf(id) : id; renderContent(); renderDrawer(); updStatus(); },
+    onLinkLabel: guard(function (l, text) { if (!l.dep) return; return api('dep_save', { project_id: S.pid, from_id: l.dep.from_id, to_id: l.dep.to_id, label: text, out_name: l.dep.out_name || '', in_name: l.dep.in_name || '' }).then(reload); }),
     onLinkDelete: guard(function (l) { if (!l.dep) return; return api('dep_delete', { project_id: S.pid, id: l.dep.id }).then(reload); }),
-    onLinkReverse: guard(function (l) { var d = l.dep; if (!d) return; return api('dep_delete', { project_id: S.pid, id: d.id }).then(function () { return api('dep_save', { project_id: S.pid, from_id: d.to_id, to_id: d.from_id, label: d.label }); }).then(reload); }),
+    onLinkReverse: guard(function (l) { var d = l.dep; if (!d) return; return api('dep_delete', { project_id: S.pid, id: d.id }).then(function () { return api('dep_save', { project_id: S.pid, from_id: d.to_id, to_id: d.from_id, label: d.label, out_name: d.in_name || '', in_name: d.out_name || '' }); }).then(reload); }),
+    readActions: function (it) { var id = rawId(it.id), n = it.node, a = [{ icon: '📝', title: 'جزئیات', fn: function () { S.sel = id; S.drawerOpen = true; renderDrawer(); } }];
+      a.push({ icon: n.kind === 'task' ? '📄' : '⤵', title: n.kind === 'task' ? 'باز کردنِ صفحهٔ کار' : 'باز کردنِ زیرمجموعه', fn: function () { S.sel = id; S.focus = id; renderContent(); renderDrawer(); } });
+      if (n.kind === 'module') a.push({ icon: '📤', title: 'ذخیره در کتابخانه (رونوشت)', fn: function () { saveToLib(id); } }); return a; },
     itemActions: function (it) {
-      var id = rawId(it.id);
-      return [{ icon: '📝', title: 'جزئیات و ویرایش', fn: function () { S.sel = id; S.drawerOpen = true; renderDrawer(); } },
-        { icon: '⤵', title: 'باز کردنِ زیرمجموعه', fn: function () { S.sel = id; S.focus = id; renderContent(); renderDrawer(); } },
-        { icon: '＋', title: 'زیربخش داخلِ این بلوک', fn: function () { addNodeDialog(id); } },
+      var id = rawId(it.id), n = it.node, a = [{ icon: '📝', title: 'جزئیات و ویرایش', fn: function () { S.sel = id; S.drawerOpen = true; renderDrawer(); } },
+        { icon: n.kind === 'task' ? '📄' : '⤵', title: n.kind === 'task' ? 'باز کردنِ صفحهٔ کار' : 'باز کردنِ زیرمجموعه', fn: function () { S.sel = id; S.focus = id; renderContent(); renderDrawer(); } },
         { icon: '🙂', title: 'آیکن', fn: function () { iconDialog(id); } },
+        { icon: '⇢', title: 'افزودنِ ورودی', fn: function () { portDialog(id, 'inputs'); } }, { icon: '⇠', title: 'افزودنِ خروجی', fn: function () { portDialog(id, 'outputs'); } },
         { icon: '⎇', title: 'فلوچارت', fn: function () { ACTS.flowedit(null, null, id); } }];
+      if (childKinds(id).length) a.splice(2, 0, { icon: '＋', title: 'افزودنِ زیربخش داخلِ این بلوک', fn: function () { addNodeDialog(id); } });
+      if (n.kind === 'module') a.push({ icon: '📤', title: 'ذخیره در کتابخانه', fn: function () { saveToLib(id); } });
+      return a;
     } });
   cv.setData(m.items, m.links);
+  if (S.tool) cv.arm(S.tool);
   if (fresh) cv.fit();
   var sid = S.pendingRename || S.sel;
   if (sid && m.items.some(function (i) { return i.id === String(sid); })) cv.select([String(sid)]);
@@ -364,7 +534,6 @@ function mountMap() {
   if (S.pendingLink) { var pl = S.pendingLink; S.pendingLink = ''; cv.select([], pl); setTimeout(function () { cv.editLabel(pl); }, 60); }
 }
 function iconDialog(id) {
-  var n = S.idx.byId.get(id);
   modal({ title: 'آیکنِ بلوک', noOk: true, body: '<div class="icons">' + ICONS.map(function (e) { return '<button type="button" class="btn ic" data-e="' + e + '">' + e + '</button>'; }).join('') + '<button type="button" class="btn ic" data-e="">∅</button></div><label class="f"><span>یا خودتان بنویسید (یک ایموجی)</span><input name="own" maxlength="4"></label>',
     setup: function (f, close) {
       function set(e) { return api('node_save', { project_id: S.pid, id: id, icon: e }).then(function () { close(); return reload(); }).catch(fail); }
@@ -372,28 +541,70 @@ function iconDialog(id) {
       $('[name=own]', f).addEventListener('change', function (e) { set(e.target.value.trim()); });
     } });
 }
+/* افزودنِ ورودی/خروجی (برای «کار» فقط یکی) */
+function portDialog(id, field) {
+  var n = S.idx.byId.get(id), list = (n[field] || []).slice(), single = n.kind === 'task', lbl = field === 'inputs' ? 'ورودی' : 'خروجی', cur = single && list[0] ? list[0] : { name: '', desc: '' };
+  modal({ title: (single && list[0] ? 'ویرایشِ ' : 'افزودنِ ') + lbl, body: '<label class="f"><span>نامِ ' + lbl + '</span><input name="name" value="' + esc(cur.name) + '" required></label><label class="f"><span>توضیح / قالبِ داده (اختیاری)</span><input name="desc" value="' + esc(cur.desc) + '"></label>' +
+    (single ? '<p class="mut sm">«کار» فقط یک ' + lbl + ' دارد.</p>' : ''),
+    onok: function (f) {
+      var it = { name: $('[name=name]', f).value.trim(), desc: $('[name=desc]', f).value.trim() }; if (!it.name) return false;
+      if (single) list = [it]; else list.push(it);
+      var body = { project_id: S.pid, id: id }; body[field] = list;
+      return api('node_save', body).then(reload);
+    } });
+}
+
+/* ---------- صفحهٔ «کار» (آخرین سطح) ---------- */
+function ioBox(title, list, cls) {
+  var p = list && list[0];
+  return '<div class="iobox ' + cls + '"><div class="io-h">' + title + '</div>' + (p ? '<div class="io-n">' + esc(p.name) + '</div><div class="mut sm">' + esc(p.desc || '') + '</div>' : '<div class="mut sm">تعریف نشده</div>') + '</div>';
+}
+function taskPage(n) {
+  var files = S.P.files.filter(function (f) { return f.node_id === n.id; }), logs = S.P.logs.filter(function (l) { return l.node_id === n.id; }), v = S.sch.info.get(n.id) || {};
+  var hasFlow = n.flow && n.flow.nodes && n.flow.nodes.length;
+  return '<div class="task"><div class="task-h"><span class="bk-i">' + esc(n.icon || '✔️') + '</span><div class="grow"><h2>' + esc(n.title) + '</h2><div class="mut sm">' + esc(n.summary || '') + '</div></div>' + statusPill(n.status) +
+    '<div style="width:140px">' + bar(n.progress) + '<div class="sm mut">' + FA(n.progress) + '٪ · ⏱ ' + fmtDur(nodeTime(n.id)) + '</div></div><button class="btn" data-act="pick" data-id="' + n.id + '">📝 ' + (S.editing ? 'ویرایشِ مشخصات' : 'مشخصات') + '</button></div>' +
+    '<div class="io-row">' + ioBox('⇢ ورودی', n.inputs, 'in') + '<div class="io-arrow">⚙️<small>پردازش</small></div>' + ioBox('⇠ خروجی', n.outputs, 'out') + '</div>' +
+    (n.details ? '<div class="card"><h2 class="sec">📄 توضیحات</h2><div class="pre">' + esc(n.details) + '</div></div>' : '') +
+    (n.process ? '<div class="card"><h2 class="sec">⚙️ ورودی چطور به خروجی تبدیل می‌شود؟</h2><div class="pre">' + esc(n.process) + '</div></div>' : '') +
+    '<div class="card"><h2 class="sec">⎇ فلوچارت <button class="btn sm" data-act="flowedit" data-id="' + n.id + '">' + (S.editing ? (hasFlow ? '✎ ویرایش' : '＋ رسم فلوچارت') : '🔍 بزرگ‌نمایی') + '</button></h2>' +
+    (hasFlow ? '<div class="flthumb big" data-act="flowedit" data-id="' + n.id + '">' + FLOW.svg(n.flow, { width: '100%', height: 'auto', ink: 'currentColor' }) + '</div>' : '<div class="mut">فلوچارتی رسم نشده.</div>') + '</div>' +
+    '<div class="card"><h2 class="sec">🖼️ تصویر و پیوست</h2>' + (filesHtml(files.filter(function (f) { return !f.log_id; })) || '<div class="mut sm">پیوستی نیست.</div>') +
+    (S.editing ? '<div style="margin-top:8px"><input type="file" multiple data-chg="upnode" data-id="' + n.id + '"></div>' : '') + '</div>' +
+    '<div class="card"><h2 class="sec">📝 یادداشت‌ها</h2>' + logForm(n.id) + '<div style="margin-top:10px">' + (logs.map(function (l) { return logHtml(l, false); }).join('') || '<div class="mut sm">هنوز یادداشتی نیست.</div>') + '</div></div></div>';
+}
+
+/* ---------- کتابخانهٔ ماژول‌ها ---------- */
+function openLibrary() { return api('library').then(function (r) { location.hash = '#/p/' + r.id + '/map'; }); }
+function libPicker(onPick) {
+  return api('library_list').then(function (j) {
+    var rows = j.modules.map(function (m) {
+      return '<div class="libr" data-lid="' + m.id + '"><span class="libr-i">' + esc(m.icon || '🧩') + '</span><div class="grow"><b>' + esc(m.title) + '</b>' + (m.src_name ? ' <span class="pill">ارث از «' + esc(m.src_name) + '»</span>' : '') +
+        '<div class="mut sm">' + esc(m.summary || '') + '</div><div class="sm">⇢ ' + FA((m.inputs || []).length) + ' ورودی: ' + esc((m.inputs || []).map(function (x) { return x.name; }).join('، ') || '—') + ' · ⇠ ' + FA((m.outputs || []).length) + ' خروجی: ' + esc((m.outputs || []).map(function (x) { return x.name; }).join('، ') || '—') + ' · ' + FA(m.children) + ' بخشِ داخلی</div></div>' +
+        '<button type="button" class="btn pri sm" data-pick="' + m.id + '">درج</button></div>';
+    }).join('');
+    var mdl = modal({ title: '📚 ماژولی از کتابخانه انتخاب کنید', cls: 'wide', noOk: true, noFocus: true,
+      body: rows ? '<div class="liblist">' + rows + '</div><p class="mut sm">با «درج»، یک رونوشتِ کامل (با زیرمجموعه و فلوچارت) در همین جایگاه ساخته می‌شود و می‌توانید برای این پروژه تغییرش دهید؛ منبع در بلوک نوشته می‌شود.</p>' : '<div class="empty">کتابخانه هنوز ماژولی ندارد.<br>در «ابزار ← کتابخانهٔ ماژول‌ها» بسازید، یا یک ماژولِ پروژه را «ذخیره در کتابخانه» کنید.</div>',
+      setup: function (f, close) { $$('[data-pick]', f).forEach(function (b) { b.addEventListener('click', function () { var m = j.modules.filter(function (x) { return x.id === +b.getAttribute('data-pick'); })[0]; close(); onPick(m); }); }); } });
+    return mdl;
+  });
+}
+function insertFromLib(libNodeId, pt) {
+  var p = pt || (S.cv ? S.cv.centerOf() : { x: 0, y: 0 });
+  return api('node_copy', { src_node_id: libNodeId, dst_project_id: S.pid, dst_parent_id: S.focus || null, x: Math.round(p.x - 135), y: Math.round(p.y - 66) }).then(function (r) { S.sel = r.id; S.tool = null; toast('ماژول درج شد (' + FA(r.count) + ' بخش)'); return reload(); });
+}
+function saveToLib(id) {
+  var n = S.idx.byId.get(id); if (!n || n.kind !== 'module') return toast('فقط «ماژول» در کتابخانه ذخیره می‌شود', true);
+  modal({ title: '📤 ذخیره در کتابخانهٔ ماژول‌ها', body: '<p>یک رونوشتِ کامل از «' + esc(n.title) + '» (با زیرمجموعه، ورودی/خروجی و فلوچارت‌ها) در کتابخانه ساخته می‌شود تا در پروژه‌های دیگر هم استفاده شود.</p><label class="f"><span>نام در کتابخانه</span><input name="t" value="' + esc(n.title) + '" required></label>', ok: 'ذخیره در کتابخانه',
+    onok: function (f) { return api('library').then(function (lib) { return api('node_copy', { src_node_id: id, dst_project_id: lib.id, dst_parent_id: null, title: $('[name=t]', f).value, x: 0, y: 0 }); }).then(function () { toast('در کتابخانه ذخیره شد ✓'); }); } });
+}
+function deriveModule(id) {
+  var n = S.idx.byId.get(id); if (!n || !isLib()) return;
+  modal({ title: '🧬 ساختِ مشتق', body: '<p>یک ماژولِ تازه که از «' + esc(n.title) + '» ارث می‌برد (همهٔ ساختارِ آن را دارد) و می‌توانید تغییرش دهید.</p><label class="f"><span>نامِ ماژولِ مشتق</span><input name="t" value="' + esc(n.title) + ' (مشتق)" required></label>', ok: 'ساختن',
+    onok: function (f) { return api('node_copy', { src_node_id: id, dst_project_id: S.pid, dst_parent_id: null, title: $('[name=t]', f).value, x: (n.x || 0) + 60, y: (n.y || 0) + 60 }).then(function (r) { S.sel = r.id; toast('مشتق ساخته شد'); return reload(); }); } });
+}
 
 /* ---------- فهرست ---------- */
-function isOpen(id) { return id in S.open ? S.open[id] : S.idx.depth(id) < 1; }
-function outlineView() {
-  var idx = S.idx, rows = [];
-  (function walk(pid) {
-    idx.children(pid).forEach(function (id) {
-      var n = idx.byId.get(id), v = S.sch.info.get(id) || {}, kc = idx.children(id).length, d = idx.depth(id);
-      rows.push('<div class="tr' + (S.sel === id ? ' sel' : '') + '" style="padding-inline-start:' + (8 + d * 22) + 'px"><span class="tg" data-act="toggle" data-id="' + id + '">' + (kc ? (isOpen(id) ? '▾' : '◂') : '·') + '</span>' +
-        '<span class="kb2 ' + n.kind + '">' + E.KIND[n.kind] + '</span><span class="tt" data-act="pick" data-id="' + id + '">' + esc(n.title) + '</span>' +
-        statusPill(v.status || n.status) + '<span style="width:70px">' + bar(v.progress) + '</span><span class="sm mut" style="width:46px">' + FA(v.progress || 0) + '٪</span>' +
-        '<span class="sm mut" style="width:54px">' + (v.dur ? num(v.dur) + ' روز' : '') + '</span>' +
-        '<span class="row" style="gap:2px;flex-wrap:nowrap"><button class="btn sm ghost" title="زیربخش جدید" data-act="addnode" data-parent="' + id + '">＋</button>' +
-        '<button class="btn sm ghost" title="بالاتر" data-act="mv" data-id="' + id + '" data-d="up">↑</button><button class="btn sm ghost" title="پایین‌تر" data-act="mv" data-id="' + id + '" data-d="down">↓</button>' +
-        '<button class="btn sm ghost" title="تورفتگی (زیرِ بخشِ بالایی)" data-act="mv" data-id="' + id + '" data-d="in">⇥</button><button class="btn sm ghost" title="یک سطح بیرون" data-act="mv" data-id="' + id + '" data-d="out">⇤</button></span></div>');
-      if (kc && isOpen(id)) walk(id);
-    });
-  })(0);
-  return '<div class="row" style="margin-bottom:10px"><button class="btn pri" data-act="addnode" data-parent="0">+ بخش اصلی جدید</button>' +
-    '<button class="btn" data-act="expand" data-v="1">باز کردن همه</button><button class="btn" data-act="expand" data-v="0">بستن همه</button></div>' +
-    (rows.length ? '<div class="tree card" style="padding:0;overflow:hidden">' + rows.join('') + '</div>' : '<div class="card empty">هنوز بخشی نیست.</div>');
-}
 function moveNode(id, dir) {
   var idx = S.idx, par = idx.parentOf(id), sibs = idx.children(par), i = sibs.indexOf(id), np = par, ni = i;
   if (dir === 'up') { if (i === 0) return; ni = i - 1; }
@@ -408,15 +619,16 @@ function planView() {
   var idx = S.idx, sch = S.sch;
   if (!sch.order.length) return '<div class="card empty">برای زمان‌بندی ابتدا بخش‌هایی بسازید.</div>';
   var tgt = J.isoToDay(S.P.project.target_date), late = tgt != null && sch.end - 1 > tgt;
+  var dis = S.editing ? '' : ' disabled';
   var rows = sch.order.map(function (id, i) {
     var n = idx.byId.get(id), v = sch.info.get(id);
     var deps = Array.from(sch.preds.get(id) || []).map(function (q) { return esc(idx.byId.get(q).title); }).join('، ');
     return '<tr data-id="' + id + '"><td>' + FA(i + 1) + '</td><td><span class="pill">فاز ' + FA(v.phase) + '</span></td>' +
       '<td><a class="tt" data-act="pick" data-id="' + id + '" style="cursor:pointer">' + esc(n.title) + '</a><div class="mut sm">' + esc(idx.pathText(idx.parentOf(id))) + '</div></td>' +
       '<td class="sm mut" style="max-width:200px">' + (deps || '—') + '</td>' +
-      '<td><input type="number" step="0.5" min="0" data-f="est_days" value="' + (n.est_days == null ? '' : n.est_days) + '" placeholder="' + (v.heur) + '" style="width:76px"></td>' +
-      '<td><input type="number" step="0.5" min="0" data-f="final_days" value="' + (n.final_days == null ? '' : n.final_days) + '" placeholder="—" style="width:76px"></td>' +
-      '<td><input class="ltr jd" data-f="start_date" data-iso="' + esc(n.start_date || '') + '" value="' + (n.start_date ? J.fmt(n.start_date) : '') + '" placeholder="' + J.fmt(J.dayToIso(v.es)) + '" style="width:104px"></td>' +
+      '<td><input type="number" step="0.5" min="0" data-f="est_days"' + dis + ' value="' + (n.est_days == null ? '' : n.est_days) + '" placeholder="' + (v.heur) + '" style="width:76px"></td>' +
+      '<td><input type="number" step="0.5" min="0" data-f="final_days"' + dis + ' value="' + (n.final_days == null ? '' : n.final_days) + '" placeholder="—" style="width:76px"></td>' +
+      '<td><input class="ltr jd"' + dis + ' data-f="start_date" data-iso="' + esc(n.start_date || '') + '" value="' + (n.start_date ? J.fmt(n.start_date) : '') + '" placeholder="' + J.fmt(J.dayToIso(v.es)) + '" style="width:104px"></td>' +
       '<td class="sm">' + J.fmt(J.dayToIso(v.ef - 1)) + (v.conflict ? ' <span class="crit" title="شروعِ دستی پیش از پایانِ پیش‌نیاز است">⚠</span>' : '') + '</td>' +
       '<td>' + (v.crit ? '<span class="crit">بحرانی</span>' : '<span class="mut sm">' + FA(v.slack) + ' روز شناور</span>') + '</td>' +
       '<td>' + statusPill(n.status) + '</td></tr>';
@@ -424,8 +636,8 @@ function planView() {
   return '<div class="card" style="margin-bottom:12px"><div class="row"><div class="grow"><b>ترتیبِ پیشنهادیِ شروعِ کار</b><div class="mut sm">برگ‌ها بر پایهٔ وابستگی‌ها مرتب شده‌اند (پیش‌نیازها اول). کارهای هم‌فاز مستقل‌اند و می‌توانند هم‌زمان انجام شوند. ' +
     'ستون «برآورد» پیشنهاد است (اگر خالی بماند، از روی تعداد ورودی/خروجی و طول توضیح حدس زده می‌شود و در نوشتهٔ کم‌رنگ دیده می‌شود)؛ ستون «نهایی» را شما می‌نویسید و در تایم‌لاین ملاک می‌شود.</div></div>' +
     '<div><b>' + num(sch.root.total) + ' روز</b> کار · پایان: <b class="' + (late ? 'crit' : '') + '">' + J.fmt(J.dayToIso(sch.end - 1), true) + '</b></div></div>' +
-    '<div class="row" style="margin-top:10px"><button class="btn" data-act="fillest">پُرکردنِ برآوردهای خالی با پیشنهاد</button>' +
-    '<button class="btn pri" data-act="applysched">ثبتِ تاریخ‌های پیشنهادی در بخش‌ها</button><button class="btn" data-act="clearsched">پاک‌کردن تاریخ‌های ثبت‌شده</button></div></div>' +
+    '<div class="row" style="margin-top:10px"><button class="btn"' + dis + ' data-act="fillest">پُرکردنِ برآوردهای خالی با پیشنهاد</button>' +
+    '<button class="btn pri"' + dis + ' data-act="applysched">ثبتِ تاریخ‌های پیشنهادی در بخش‌ها</button><button class="btn"' + dis + ' data-act="clearsched">پاک‌کردن تاریخ‌های ثبت‌شده</button></div></div>' +
     '<div style="overflow-x:auto" data-sk="plan"><table class="t"><thead><tr><th>#</th><th>فاز</th><th>بخش</th><th>پیش‌نیازها</th><th>برآورد (روز)</th><th>نهایی (روز)</th><th>شروع</th><th>پایان</th><th>شناوری</th><th>وضعیت</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     (sch.cycle ? '<p class="crit">⚠ چرخه در وابستگی‌ها پیدا شد.</p>' : '');
 }
@@ -524,7 +736,7 @@ function ganttView() {
   if (!rows.length) return '<div class="card empty">برای دیدنِ تایم‌لاین ابتدا بخش بسازید.</div>';
   return '<div class="gtools">' + zb + '<label class="row sm" style="gap:4px"><input type="checkbox" data-act="critbox"' + (S.crit ? ' checked' : '') + '> مسیر بحرانی</label>' +
     '<button class="btn sm" data-act="gotoday">برو به امروز</button><span class="grow"></span><button class="btn sm" data-act="expand" data-v="1">باز کردن همه</button><button class="btn sm" data-act="expand" data-v="0">بستن همه</button>' +
-    '<button class="btn sm pri" data-act="addms">+ نقطهٔ عطف (تایم‌استون)</button></div>' + legend +
+    (S.editing ? '<button class="btn sm pri" data-act="addms">+ نقطهٔ عطف (تایم‌استون)</button>' : '') + '</div>' + legend +
     '<div class="gwrap" data-sk="gwrap" style="margin-top:8px"><div class="glabels"><div class="glh">بخش‌ها</div>' + (msH ? '<div style="height:' + msH + 'px;border-bottom:1px solid var(--line)" class="mut sm" ><span style="padding:4px 10px;display:block">نقاط عطف</span></div>' : '') + labels + '</div>' +
     '<div class="gscroll" data-sk="gscroll">' + svg + '</div></div>';
 }
@@ -548,6 +760,7 @@ function filesHtml(files) {
   }).join('') + '</div>';
 }
 function logForm(nodeId) {
+  if (!S.editing) return '<div class="mut sm">برای افزودنِ یادداشت «✎ ویرایش» را بزنید.</div>';
   return '<form data-form="addlog" data-node="' + nodeId + '"><textarea name="body" placeholder="یادداشت، توضیحِ انجام کار، تصمیم… (می‌توانید عکس را همین‌جا Paste کنید)"></textarea>' +
     '<div class="row" style="margin-top:6px"><select name="kind" style="width:auto"><option value="note">یادداشت</option><option value="ai_report">گزارش هوش مصنوعی/انجام</option><option value="change">تغییر</option></select>' +
     '<input type="file" name="files" multiple class="grow" style="padding:3px"><button class="btn pri sm" type="submit">ثبت</button></div></form>';
@@ -574,12 +787,12 @@ function aiView() {
     '<li><b>فایل + دستورِ آماده را به هوش مصنوعی بدهید</b> (دکمهٔ «کپیِ دستور»).</li>' +
     '<li>هوش مصنوعی اگر ساختار را عوض کند، فایلِ به‌روز می‌دهد؛ <b>همان را ایمپورت کنید</b> (بخش‌های تازه/تغییرکرده اعمال می‌شوند، چیزی بدونِ تأییدِ شما پاک نمی‌شود).</li>' +
     '<li>پس از کار، هوش مصنوعی در همان فایل <b>گزارشِ انجامِ هر ماژول</b> را می‌نویسد؛ ایمپورتش کنید تا درصد/وضعیت و تایم‌لاین و تاریخچهٔ هر بخش به‌روز شود.</li></ol></div>' +
-    '<h2 class="sec">ملاحظات فنیِ پروژه برای هوش مصنوعی</h2><div class="card"><textarea id="aibrief" style="min-height:120px" placeholder="مثلاً: PHP 8.2 و MySQL، هاستِ cPanel، بدونِ فریم‌ورک، کدنویسی به سبک PSR-12، همهٔ متن‌ها فارسی…">' + esc(p.ai_brief || '') + '</textarea><div style="margin-top:8px"><button class="btn pri sm" data-act="savebrief">ذخیره</button></div></div></div>' +
+    '<h2 class="sec">ملاحظات فنیِ پروژه برای هوش مصنوعی</h2><div class="card"><textarea id="aibrief" style="min-height:120px" placeholder="مثلاً: PHP 8.2 و MySQL، هاستِ cPanel، بدونِ فریم‌ورک، کدنویسی به سبک PSR-12، همهٔ متن‌ها فارسی…">' + esc(p.ai_brief || '') + '</textarea><div style="margin-top:8px"><button class="btn pri sm" data-act="savebrief"' + (S.editing ? '' : ' disabled') + '>ذخیره</button></div></div></div>' +
     '<div><h2 class="sec">خروجی‌ها</h2><div class="card"><div class="row">' +
     '<button class="btn pri" data-act="exportjson">⬇ فایل پروژه برای هوش مصنوعی (.pm.json)</button><button class="btn" data-act="exportmd">⬇ شرحِ خوانا (Markdown)</button><button class="btn" data-act="exportzip">⬇ پیوست‌ها (zip)</button></div>' +
     '<p class="mut sm">فایل JSON همان است که بعد از ویرایشِ هوش مصنوعی ایمپورت می‌شود. تصویرها/فایل‌های پیوست داخلِ JSON نمی‌آیند (فقط نامشان)؛ اگر لازم است zip را هم به هوش مصنوعی بدهید.</p></div>' +
     '<h2 class="sec">دستورِ آماده برای هوش مصنوعی</h2><div class="card"><pre class="code" id="promptbox">' + esc(PROMPT) + '</pre><button class="btn sm" data-act="copyprompt">کپیِ دستور</button></div>' +
-    '<h2 class="sec">ایمپورتِ فایلِ برگشتی</h2><div class="card"><input type="file" id="impfile" accept=".json,application/json"><div id="impinfo" class="sm" style="margin-top:8px"></div></div></div></div>';
+    '<h2 class="sec">ایمپورتِ فایلِ برگشتی</h2><div class="card"><input type="file" id="impfile" accept=".json,application/json"' + (S.editing ? '' : ' disabled') + '>' + (S.editing ? '' : '<div class="mut sm">برای ایمپورت در این پروژه «✎ ویرایش» را بزنید.</div>') + '<div id="impinfo" class="sm" style="margin-top:8px"></div></div></div></div>';
 }
 function bindAi() {
   var f = $('#impfile'); if (!f) return;
@@ -617,80 +830,112 @@ function readImport(file, pid) {
 }
 
 /* ---------- کشوی جزئیات بخش ---------- */
-function parentOptions(excludeId, selected) {
-  var idx = S.idx, ex = {};
-  if (excludeId) { ex[excludeId] = 1; idx.descendants(excludeId).forEach(function (x) { ex[x] = 1; }); }
-  return '<option value="">(سطح اصلی پروژه)</option>' + idx.preorder.filter(function (id) { return !ex[id]; }).map(function (id) {
-    return '<option value="' + id + '"' + (id === selected ? ' selected' : '') + '>' + esc(new Array(idx.depth(id) + 1).join('— ') + idx.byId.get(id).title) + '</option>';
-  }).join('');
+function chgRow(c) {
+  var n = c.node_id ? S.idx.byId.get(c.node_id) : null;
+  return '<div class="chg"' + (n ? ' data-act="pick" data-id="' + n.id + '"' : '') + '><span class="chg-t">' + fmtDT(c.created_at) + '</span><span class="pill">' + esc(c.action) + '</span><span class="grow sm">' + esc(c.detail || '') + (c.path ? ' <span class="mut">— ' + esc(c.path) + '</span>' : '') + '</span><span class="mut sm">' + esc(c.author) + '</span></div>';
 }
-function ioRows(kind, list) {
-  return (list || []).map(function (r) { return ioRow(kind, r); }).join('');
+function histView() {
+  var P = S.P, idx = S.idx, tot = totalTime();
+  var chg = P.changes.map(chgRow).join('') || '<div class="mut">هنوز تغییری ثبت نشده.</div>';
+  var revs = P.revisions.map(function (r) {
+    return '<div class="rev"><div class="row"><b>💾 ' + fmtDT(r.created_at) + '</b><span class="mut sm">' + esc(r.author) + '</span><span class="grow"></span>' + (S.editing ? '<button class="btn sm" data-act="revrestore" data-id="' + r.id + '">↩ بازگردانی</button>' : '') + '</div>' +
+      (r.note ? '<div>' + esc(r.note) + '</div>' : '') + '<div class="mut sm">' + esc(r.summary || '') + '</div></div>';
+  }).join('') || '<div class="mut">هنوز نسخه‌ای ذخیره نشده. با «💾 ذخیره» در پایانِ هر نوبتِ ویرایش، یک نسخه ساخته می‌شود.</div>';
+  var roots = idx.children(0).map(function (id) { return { n: idx.byId.get(id), t: nodeTime(id) }; }).sort(function (a, b) { return b.t - a.t; });
+  var rows = roots.map(function (r) { var pc = tot ? Math.round(r.t / tot * 100) : 0; return '<div data-act="pick" data-id="' + r.n.id + '"><span>' + (r.n.icon || KIND_ICON[r.n.kind]) + '</span><span class="grow t">' + esc(r.n.title) + '</span><span style="width:90px">' + bar(pc) + '</span><b class="sm" style="width:92px;text-align:left">' + fmtDur(r.t) + '</b></div>'; }).join('');
+  var top = P.nodes.filter(function (n) { return (n.work_seconds || 0) > 0; }).sort(function (a, b) { return b.work_seconds - a.work_seconds; }).slice(0, 8).map(function (n) {
+    return '<div data-act="pick" data-id="' + n.id + '"><span>' + (n.icon || KIND_ICON[n.kind]) + '</span><span class="grow t">' + esc(n.title) + '</span><b class="sm">' + fmtDur(n.work_seconds) + '</b></div>'; }).join('');
+  return '<div class="kpis"><div class="card kpi"><b>⏱ ' + fmtDur(tot) + '</b><span>کلِ زمانِ صرف‌شده برای طراحیِ این پروژه</span></div>' +
+    '<div class="card kpi"><b>' + FA(P.changes.length) + '</b><span>تغییرِ ثبت‌شده (۱۵۰ تای آخر)</span></div><div class="card kpi"><b>' + FA(P.revisions.length) + '</b><span>نسخهٔ ذخیره‌شده</span></div></div>' +
+    '<div class="two"><div><h2 class="sec">🔄 آخرین تغییرات (چه، کجا، کِی)</h2><div class="card chglist">' + chg + '</div></div>' +
+    '<div><h2 class="sec">💾 نسخه‌های ذخیره‌شده</h2><div class="card">' + revs + '</div>' +
+    '<h2 class="sec">⏱ زمانِ طراحی به تفکیکِ بخش</h2><div class="card list">' + (rows || '<div class="mut">—</div>') +
+    ((P.project.work_seconds || 0) ? '<div><span>🧭</span><span class="grow t">کارِ کلیِ پروژه (بدونِ بخشِ مشخص)</span><b class="sm">' + fmtDur(P.project.work_seconds) + '</b></div>' : '') + '</div>' +
+    (top ? '<h2 class="sec">🔥 بیشترین زمان روی…</h2><div class="card list">' + top + '</div>' : '') +
+    '<p class="mut sm">زمان فقط وقتی حساب می‌شود که در «حالتِ ویرایش» باشید، صفحه باز و فعال باشد و بخشی را انتخاب کرده باشید.</p></div></div>';
 }
+
+/* ---------- کشوی جزئیات ---------- */
+function validParents(node) {
+  var idx = S.idx, ex = {}; ex[node.id] = 1; idx.descendants(node.id).forEach(function (x) { ex[x] = 1; });
+  return idx.preorder.filter(function (id) { return !ex[id] && childKindsOf(idx.byId.get(id).kind).indexOf(node.kind) >= 0; });
+}
+function parentSelect(node) {
+  var cur = S.idx.parentOf(node.id), o = childKindsOf(null).indexOf(node.kind) >= 0 ? '<option value="">(سطحِ اصلی)</option>' : '';
+  validParents(node).forEach(function (id) { var n = S.idx.byId.get(id); o += '<option value="' + id + '"' + (id === cur ? ' selected' : '') + '>' + esc(new Array(S.idx.depth(id) + 1).join('— ') + (n.icon || KIND_ICON[n.kind]) + ' ' + n.title) + '</option>'; });
+  return o;
+}
+function ioRows(kind, list, single) { return (list || []).slice(0, single ? 1 : 99).map(function (r) { return ioRow(kind, r); }).join(''); }
 function ioRow(kind, r) {
   r = r || {};
-  return '<div class="io"><input data-io="' + kind + '-name" placeholder="نام" value="' + esc(r.name || '') + '"><input data-io="' + kind + '-desc" placeholder="توضیح / قالب داده" value="' + esc(r.desc || '') + '"><button type="button" class="btn sm ghost danger" data-act="rmrow">×</button></div>';
+  return '<div class="io"><input data-io="' + kind + '-name" placeholder="نام" value="' + esc(r.name || '') + '"><input data-io="' + kind + '-desc" placeholder="توضیح / قالبِ داده" value="' + esc(r.desc || '') + '"><button type="button" class="btn sm ghost danger" data-act="rmrow">×</button></div>';
 }
 function depBlock(id, dir) { // dir: 'in' پیش‌نیازها  |  'out' پس‌نیازها
-  var idx = S.idx, list = dir === 'in' ? (idx.inn.get(id) || []) : (idx.out.get(id) || []);
+  var idx = S.idx, list = dir === 'in' ? (idx.inn.get(id) || []) : (idx.out.get(id) || []), ed = S.editing;
   var rel = {}; rel[id] = 1; idx.descendants(id).forEach(function (x) { rel[x] = 1; }); idx.chain(id).forEach(function (x) { rel[x] = 1; });
-  var used = {}; list.forEach(function (d) { used[dir === 'in' ? d.from_id : d.to_id] = 1; });
-  var opts = idx.preorder.filter(function (x) { return !rel[x] && !used[x]; }).map(function (x) { return '<option value="' + x + '">' + esc(idx.pathText(x, ' › ')) + '</option>'; }).join('');
+  var opts = idx.preorder.filter(function (x) { return !rel[x]; }).map(function (x) { return '<option value="' + x + '">' + esc(idx.pathText(x, ' › ')) + '</option>'; }).join('');
   var outNames = (idx.byId.get(id).outputs || []).map(function (o) { return '<option value="' + esc(o.name) + '">'; }).join('');
-  return '<div class="sub"><h4>' + (dir === 'in' ? 'پیش‌نیازها — این بخش به این‌ها وابسته است (ورودی‌اش را از این‌ها می‌گیرد)' : 'پس‌نیازها — این بخش ورودیِ این‌هاست (خروجی‌اش را می‌گیرند)') + '</h4>' +
+  return '<div class="sub"><h4>' + (dir === 'in' ? '⇢ ورودی‌ها از… (این بخش از این‌ها می‌گیرد)' : '⇠ خروجی‌ها به… (این‌ها از این بخش می‌گیرند)') + '</h4>' +
     (list.map(function (d) {
-      var oid = dir === 'in' ? d.from_id : d.to_id;
-      return '<div class="dep"><a class="grow sm" style="cursor:pointer" data-act="pick" data-id="' + oid + '">' + esc(idx.byId.get(oid).title) + '</a><input class="grow" data-dlabel="' + d.id + '" data-from="' + d.from_id + '" data-to="' + d.to_id + '" value="' + esc(d.label || '') + '" placeholder="چه چیزی منتقل می‌شود؟"' + (dir === 'out' ? ' list="outl"' : '') + '><button class="btn sm ghost danger" data-act="deldep" data-id="' + d.id + '">×</button></div>';
+      var oid = dir === 'in' ? d.from_id : d.to_id, ports = (d.out_name || d.in_name) ? '<span class="pill">' + esc(d.out_name || '؟') + ' ← ' + esc(d.in_name || '؟') + '</span>' : '';
+      return '<div class="dep"><a class="grow sm" style="cursor:pointer" data-act="pick" data-id="' + oid + '">' + (idx.byId.get(oid).icon || KIND_ICON[idx.byId.get(oid).kind]) + ' ' + esc(idx.byId.get(oid).title) + '</a>' + ports + '<input class="grow" data-dlabel="' + d.id + '" data-from="' + d.from_id + '" data-to="' + d.to_id + '" data-on="' + esc(d.out_name || '') + '" data-in="' + esc(d.in_name || '') + '" value="' + esc(d.label || '') + '" placeholder="برچسب"' + (ed ? '' : ' disabled') + '>' + (ed ? '<button class="btn sm ghost danger" data-act="deldep" data-id="' + d.id + '">×</button>' : '') + '</div>';
     }).join('') || '<div class="mut sm">—</div>') +
-    (opts ? '<form data-form="adddep" data-dir="' + dir + '" data-id="' + id + '" class="dep" style="margin-top:6px"><select name="other" class="grow" style="width:auto"><option value="">افزودن…</option>' + opts + '</select><input name="label" class="grow" placeholder="برچسب (اختیاری)"' + (dir === 'out' ? ' list="outl"' : '') + '><button class="btn sm" type="submit">＋</button></form>' : '') +
-    (dir === 'out' ? '<datalist id="outl">' + outNames + '</datalist>' : '') + '</div>';
+    (ed && opts ? '<form data-form="adddep" data-dir="' + dir + '" data-id="' + id + '" class="dep" style="margin-top:6px"><select name="other" class="grow" style="width:auto"><option value="">افزودن…</option>' + opts + '</select><input name="label" class="grow" placeholder="برچسب (اختیاری)"><button class="btn sm" type="submit">＋</button></form>' : '') + '</div>';
 }
 function renderDrawer() {
   var d = $('#drawer'); if (!d) return;
   if (!S.sel || !S.idx.byId.has(S.sel) || (S.tab === 'map' && !S.drawerOpen)) { d.className = 'hidden'; d.innerHTML = ''; return; }
-  var keepTop = d.scrollTop, idx = S.idx, n = idx.byId.get(S.sel), id = n.id, v = S.sch.info.get(id) || {}, leaf = idx.isLeaf(id);
+  var keepTop = d.scrollTop, idx = S.idx, n = idx.byId.get(S.sel), id = n.id, v = S.sch.info.get(id) || {}, leaf = idx.isLeaf(id), ed = S.editing, dis = ed ? '' : ' disabled', single = n.kind === 'task';
   var nlogs = S.P.logs.filter(function (l) { return l.node_id === id; });
   var nfiles = S.P.files.filter(function (f) { return f.node_id === id && !f.log_id; });
-  var kids = idx.children(id);
-  var kindSel = Object.keys(E.KIND).map(function (k) { return '<option value="' + k + '"' + (n.kind === k ? ' selected' : '') + '>' + E.KIND[k] + '</option>'; }).join('');
+  var kids = idx.children(id), pkind = idx.parentOf(id) ? idx.byId.get(idx.parentOf(id)).kind : null;
+  var kindOK = childKindsOf(pkind).filter(function (k) { var allowed = childKindsOf(k); return kids.every(function (c) { return allowed.indexOf(idx.byId.get(c).kind) >= 0; }); });
+  var kindSel = kindOK.map(function (k) { return '<option value="' + k + '"' + (n.kind === k ? ' selected' : '') + '>' + KIND_ICON[k] + ' ' + E.KIND[k] + '</option>'; }).join('');
   var stSel = Object.keys(E.STATUS).map(function (k) { return '<option value="' + k + '"' + (n.status === k ? ' selected' : '') + '>' + E.STATUS[k] + '</option>'; }).join('');
   var prSel = [1, 2, 3].map(function (k) { return '<option value="' + k + '"' + (n.priority === k ? ' selected' : '') + '>' + E.PRIO[k] + '</option>'; }).join('');
+  var ck = childKinds(id), hasFlow = n.flow && n.flow.nodes && n.flow.nodes.length;
   d.className = '';
-  d.innerHTML = '<div class="dh"><h3>' + esc(n.title) + '</h3><button class="btn sm" data-act="closedrawer">بستن ✕</button></div>' +
-    '<div class="row sm mut" style="margin-bottom:8px">' + idx.pathText(id) + (v.es ? '<span><bdi>' + J.fmt(J.dayToIso(v.es)) + '</bdi> تا <bdi>' + J.fmt(J.dayToIso(v.ef - 1)) + '</bdi></span>' : '') + (v.crit ? '<b class="crit">بحرانی</b>' : '') + '</div>' +
-    '<form data-form="savenode" data-id="' + id + '">' +
+  d.innerHTML = '<div class="dh"><span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><h3>' + esc(n.title) + '</h3><button class="btn sm" data-act="closedrawer">بستن ✕</button></div>' +
+    '<div class="row sm mut" style="margin-bottom:6px"><span class="kb2 ' + n.kind + '">' + KIND_ICON[n.kind] + ' ' + E.KIND[n.kind] + '</span><span>' + esc(idx.pathText(id)) + '</span>' + (v.es ? '<span><bdi>' + J.fmt(J.dayToIso(v.es)) + '</bdi> تا <bdi>' + J.fmt(J.dayToIso(v.ef - 1)) + '</bdi></span>' : '') + (v.crit ? '<b class="crit">بحرانی</b>' : '') + '<span>⏱ ' + fmtDur(nodeTime(id)) + '</span></div>' +
+    (n.src_name ? '<div class="sub lineage">📚 رونوشت/ارث‌برده از ماژولِ کتابخانه: <b>' + esc(n.src_name) + '</b></div>' : '') +
+    (ed ? '' : '<div class="ro-note">👁 حالتِ مشاهده — برای تغییر «✎ ویرایش» را بزنید (بالای صفحه).</div>') +
+    '<form data-form="savenode" data-id="' + id + '"><fieldset class="fs"' + dis + '>' +
     '<label class="f"><span>عنوان</span><input name="title" value="' + esc(n.title) + '" required></label>' +
     '<div class="row"><label class="f grow"><span>نوع</span><select name="kind">' + kindSel + '</select></label><label class="f grow"><span>اولویت</span><select name="priority">' + prSel + '</select></label></div>' +
-    '<label class="f"><span>والد (جابه‌جایی در درخت)</span><select name="parent_id">' + parentOptions(id, idx.parentOf(id)) + '</select></label>' +
+    '<label class="f"><span>والد (جابه‌جایی در درخت — فقط جاهای مجاز)</span><select name="parent_id">' + parentSelect(n) + '</select></label>' +
     (leaf ? '<div class="row"><label class="f grow"><span>وضعیت</span><select name="status">' + stSel + '</select></label>' +
       '<label class="f grow"><span>درصد انجام: <b id="pv">' + FA(n.progress) + '</b>٪</span><input type="range" name="progress" min="0" max="100" step="5" value="' + n.progress + '"></label></div>' :
       '<div class="sub"><div class="row">' + statusPill(v.status) + '<div class="grow">' + bar(v.progress) + '</div><b>' + FA(v.progress) + '٪</b></div><div class="mut sm">وضعیت و درصدِ بخشی که زیرمجموعه دارد، خودکار از زیرمجموعه‌ها محاسبه می‌شود (' + FA(v.leafDone) + ' از ' + FA(v.leafCount) + ' کار انجام‌شده، مجموع ' + num(v.dur) + ' روز).</div></div>') +
     '<label class="f"><span>خلاصه (یک‌خطی)</span><input name="summary" value="' + esc(n.summary) + '"></label>' +
-    '<label class="f"><span>توضیحات کامل / نیازمندی‌ها</span><textarea name="details" style="min-height:110px">' + esc(n.details) + '</textarea></label>' +
-    '<div class="sub"><h4>ورودی‌ها</h4><div id="io-in">' + ioRows('in', n.inputs) + '</div><button type="button" class="btn sm" data-act="addio" data-k="in">＋ ورودی</button></div>' +
-    '<div class="sub"><h4>خروجی‌ها</h4><div id="io-out">' + ioRows('out', n.outputs) + '</div><button type="button" class="btn sm" data-act="addio" data-k="out">＋ خروجی</button></div>' +
-    '<label class="f"><span>پردازش (این ماژول با ورودی‌ها چه می‌کند؟)</span><textarea name="process">' + esc(n.process) + '</textarea></label>' +
-    '<div class="sub"><h4>فلوچارت (توضیحِ گرافیکیِ پردازش)</h4>' + (n.flow && n.flow.nodes && n.flow.nodes.length ?
-      '<div class="flthumb" data-act="flowedit" data-id="' + id + '" title="برای ویرایش کلیک کنید">' + FLOW.svg(n.flow, { width: '100%', height: 'auto', ink: 'currentColor' }) + '</div><div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">ویرایشِ فلوچارت</button><button type="button" class="btn sm danger" data-act="flowdel" data-id="' + id + '">حذف</button></div>' :
-      '<button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">＋ رسمِ فلوچارت</button>') + '</div>' +
-    '<div class="row"><div class="f grow"><span class="mut sm" style="display:block">رنگ</span><span class="cv-dots" id="colpick">' + window.PMCanvas.PALETTE.map(function (c) { return '<i class="cv-dot' + (n.color === c ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '"></i>'; }).join('') + '<i class="cv-dot none' + (!n.color ? ' on' : '') + '" data-c="">∅</i></span><input type="hidden" name="color" value="' + esc(n.color || '') + '"></div>' +
+    '<label class="f"><span>توضیحات کامل / نیازمندی‌ها</span><textarea name="details" style="min-height:100px">' + esc(n.details) + '</textarea></label>' +
+    '<div class="sub"><h4>⇢ ' + (single ? 'ورودی (فقط یکی)' : 'ورودی‌ها') + '</h4><div id="io-in">' + ioRows('in', n.inputs, single) + '</div>' + (single && (n.inputs || []).length ? '' : '<button type="button" class="btn sm" data-act="addio" data-k="in">＋ ورودی</button>') + '</div>' +
+    '<div class="sub"><h4>⇠ ' + (single ? 'خروجی (فقط یکی)' : 'خروجی‌ها') + '</h4><div id="io-out">' + ioRows('out', n.outputs, single) + '</div>' + (single && (n.outputs || []).length ? '' : '<button type="button" class="btn sm" data-act="addio" data-k="out">＋ خروجی</button>') + '</div>' +
+    '<label class="f"><span>پردازش (ورودی‌ها چطور به خروجی تبدیل می‌شوند؟)</span><textarea name="process">' + esc(n.process) + '</textarea></label>' +
+    '</fieldset>' +
+    '<div class="sub"><h4>⎇ فلوچارت (توضیحِ گرافیکیِ پردازش)</h4>' + (hasFlow ?
+      '<div class="flthumb" data-act="flowedit" data-id="' + id + '" title="کلیک کنید">' + FLOW.svg(n.flow, { width: '100%', height: 'auto', ink: 'currentColor' }) + '</div><div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">' + (ed ? '✎ ویرایش' : '🔍 بزرگ‌نمایی') + '</button>' + (ed ? '<button type="button" class="btn sm danger" data-act="flowdel" data-id="' + id + '">حذف</button>' : '') + '</div>' :
+      (ed ? '<button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">＋ رسمِ فلوچارت</button>' : '<div class="mut sm">فلوچارتی رسم نشده.</div>')) + '</div>' +
+    '<fieldset class="fs"' + dis + '><label class="f"><span>نکاتِ فنی (فناوری، جدول‌ها، API، فایل‌ها…)</span><textarea name="tech">' + esc(n.tech) + '</textarea></label>' +
+    '<div class="row"><div class="f grow"><span class="mut sm" style="display:block">رنگ</span><span class="cv-dots" id="colpick">' + PMCanvas.PALETTE.map(function (c) { return '<i class="cv-dot' + (n.color === c ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '"></i>'; }).join('') + '<i class="cv-dot none' + (!n.color ? ' on' : '') + '" data-c="">∅</i></span><input type="hidden" name="color" value="' + esc(n.color || '') + '"></div>' +
     '<label class="f" style="width:90px"><span>آیکن</span><input name="icon" value="' + esc(n.icon || '') + '" maxlength="4"></label></div>' +
-    '<label class="f"><span>نکات فنی (فناوری، جدول‌ها، API، فایل‌ها…)</span><textarea name="tech">' + esc(n.tech) + '</textarea></label>' +
     (leaf ? '<div class="row"><label class="f grow"><span>برآورد (روز)</span><input type="number" step="0.5" min="0" name="est_days" value="' + (n.est_days == null ? '' : n.est_days) + '" placeholder="پیشنهاد: ' + FA(E.heuristic(n)) + '"></label>' +
       '<label class="f grow"><span>زمان نهایی (روز) — دستی</span><input type="number" step="0.5" min="0" name="final_days" value="' + (n.final_days == null ? '' : n.final_days) + '"></label></div>' +
       '<label class="f"><span>تاریخ شروع (خالی = خودکار از وابستگی‌ها)</span>' + dateField('start_date', n.start_date, v.es ? J.fmt(J.dayToIso(v.es)) : '') + '</label>' : '') +
-    '<div class="row"><label class="f grow"><span>مسئول</span><input name="assignee" value="' + esc(n.assignee) + '"></label><label class="f grow"><span>برچسب‌ها</span><input name="tags" value="' + esc(n.tags) + '"></label></div>' +
-    '<div class="row"><button class="btn pri" type="submit">ذخیرهٔ بخش</button><button type="button" class="btn" data-act="addnode" data-parent="' + id + '">+ زیربخش</button><span class="grow"></span><button type="button" class="btn danger" data-act="delnode" data-id="' + id + '">حذف</button></div></form>' +
+    '<div class="row"><label class="f grow"><span>مسئول</span><input name="assignee" value="' + esc(n.assignee) + '"></label><label class="f grow"><span>برچسب‌ها</span><input name="tags" value="' + esc(n.tags) + '"></label></div></fieldset>' +
+    '<div class="row">' + (ed ? '<button class="btn pri" type="submit">💾 ذخیرهٔ بخش</button>' + (ck.length ? '<button type="button" class="btn" data-act="addnode" data-parent="' + id + '">＋ زیربخش</button>' : '') : '') +
+    (n.kind === 'module' ? '<button type="button" class="btn" data-act="savelib" data-id="' + id + '">📤 در کتابخانه</button>' : '') + (isLib() && n.kind === 'module' && ed ? '<button type="button" class="btn" data-act="derive" data-id="' + id + '">🧬 مشتق</button>' : '') +
+    '<span class="grow"></span>' + (ed ? '<button type="button" class="btn danger" data-act="delnode" data-id="' + id + '">🗑 حذف</button>' : '') + '</div></form>' +
     (kids.length ? '<h2 class="sec">زیرمجموعه‌ها</h2><div class="list">' + kids.map(nodeLink).join('') + '</div>' : '') +
-    '<h2 class="sec">وابستگی‌ها</h2>' + depBlock(id, 'in') + depBlock(id, 'out') +
-    '<h2 class="sec">پیوست‌های این بخش</h2>' + (filesHtml(nfiles) || '<div class="mut sm">—</div>') +
-    '<div style="margin-top:6px"><input type="file" multiple data-chg="upnode" data-id="' + id + '"></div>' +
-    '<h2 class="sec">تاریخچه و یادداشت‌ها</h2>' + logForm(id) + '<div style="margin-top:10px">' + (nlogs.map(function (l) { return logHtml(l, false); }).join('') || '<div class="mut sm">هنوز یادداشتی نیست.</div>') + '</div>';
+    '<h2 class="sec">پیوندها</h2>' + depBlock(id, 'in') + depBlock(id, 'out') +
+    '<h2 class="sec">🖼️ پیوست‌ها</h2>' + (filesHtml(nfiles) || '<div class="mut sm">—</div>') +
+    (ed ? '<div style="margin-top:6px"><input type="file" multiple data-chg="upnode" data-id="' + id + '"></div>' : '') +
+    '<h2 class="sec">📝 تاریخچه و یادداشت‌ها</h2>' + logForm(id) + '<div style="margin-top:10px">' + (nlogs.map(function (l) { return logHtml(l, false); }).join('') || '<div class="mut sm">هنوز یادداشتی نیست.</div>') + '</div>';
   d.scrollTop = keepTop;
 }
 function collectNode(f) {
   var o = {};
-  ['title', 'kind', 'summary', 'details', 'process', 'tech', 'assignee', 'tags'].forEach(function (k) { var e = $('[name=' + k + ']', f); if (e) o[k] = e.value; });
+  ['title', 'summary', 'details', 'process', 'tech', 'assignee', 'tags'].forEach(function (k) { var e = $('[name=' + k + ']', f); if (e) o[k] = e.value; });
+  var kd = $('[name=kind]', f); if (kd && kd.value) o.kind = kd.value;
   o.priority = +$('[name=priority]', f).value;
   var cl = $('[name=color]', f); if (cl) o.color = cl.value || '';
   var ic = $('[name=icon]', f); if (ic) o.icon = ic.value.trim();
@@ -709,21 +954,56 @@ function collectNode(f) {
   return o;
 }
 
-/* ---------- افزودن بخش / نقطهٔ عطف ---------- */
+/* ---------- افزودنِ بخش (با رعایتِ سلسله‌مراتب) ---------- */
 function addNodeDialog(parent) {
-  modal({ title: 'بخش تازه', body: '<label class="f"><span>عنوان</span><input name="title" required></label>' +
-    '<div class="row"><label class="f grow"><span>نوع</span><select name="kind"><option value="section">بخش کلی (گروه)</option><option value="module" selected>ماژول (ورودی/خروجی/پردازش)</option><option value="task">جزئیات / کار</option></select></label>' +
-    '<label class="f grow"><span>والد</span><select name="parent_id">' + parentOptions(0, parent) + '</select></label></div>' +
-    '<label class="f"><span>خلاصه (اختیاری)</span><input name="summary"></label>',
-    ok: 'ساختن', onok: function (f) {
-      var pv = $('[name=parent_id]', f).value;
-      return api('node_save', { project_id: S.pid, title: $('[name=title]', f).value, kind: $('[name=kind]', f).value, summary: $('[name=summary]', f).value, parent_id: pv ? +pv : null }).then(function (r) {
+  parent = parent || 0;
+  var idx = S.idx, cands = idx.preorder.filter(function (id) { return childKindsOf(idx.byId.get(id).kind).length; });
+  var rootOK = childKindsOf(null).length;
+  if (!cands.length && !rootOK) return toast('هیچ جایی برای افزودن نیست', true);
+  var popt = (rootOK ? '<option value="">(سطحِ اصلی)</option>' : '') + cands.map(function (id) { var n = idx.byId.get(id); return '<option value="' + id + '"' + (id === parent ? ' selected' : '') + '>' + esc(new Array(idx.depth(id) + 1).join('— ') + (n.icon || KIND_ICON[n.kind]) + ' ' + n.title) + '</option>'; }).join('');
+  modal({ title: '➕ افزودنِ بخش', body: '<label class="f"><span>والد</span><select name="parent_id">' + popt + '</select></label><div class="row" id="kindrow"></div>' +
+    '<label class="f"><span>عنوان</span><input name="title" required></label><label class="f"><span>خلاصه (اختیاری)</span><input name="summary"></label>',
+    ok: 'ساختن',
+    setup: function (f) {
+      function fill() {
+        var pv = $('[name=parent_id]', f).value, ks = childKinds(pv ? +pv : 0);
+        $('#kindrow', f).innerHTML = ks.map(function (k, i) { return '<label class="kindopt"><input type="radio" name="kind" value="' + k + '"' + (i === (ks.indexOf('module') >= 0 ? ks.indexOf('module') : 0) ? ' checked' : '') + '><span style="--tc:' + KCOL[k] + '">' + KIND_ICON[k] + ' ' + E.KIND[k] + '</span></label>'; }).join('') || '<span class="crit">این جایگاه زیرمجموعه نمی‌گیرد</span>';
+      }
+      fill(); $('[name=parent_id]', f).addEventListener('change', fill);
+    },
+    onok: function (f) {
+      var pv = $('[name=parent_id]', f).value, kd = $('[name=kind]:checked', f); if (!kd) return false;
+      return api('node_save', { project_id: S.pid, title: $('[name=title]', f).value, kind: kd.value, summary: $('[name=summary]', f).value, parent_id: pv ? +pv : null }).then(function (r) {
         if (pv) S.open[+pv] = true;
         S.sel = r.id; if (S.tab === 'map') S.focus = pv ? +pv : 0;
         return reload();
       });
     } });
 }
+
+/* ---------- فهرست ---------- */
+function isOpen(id) { return id in S.open ? S.open[id] : S.idx.depth(id) < 1; }
+function outlineView() {
+  var idx = S.idx, rows = [], ed = S.editing;
+  (function walk(pid) {
+    idx.children(pid).forEach(function (id) {
+      var n = idx.byId.get(id), v = S.sch.info.get(id) || {}, kc = idx.children(id).length, d = idx.depth(id), cnt = childKinds(id).length;
+      rows.push('<div class="tr' + (S.sel === id ? ' sel' : '') + '" style="padding-inline-start:' + (8 + d * 22) + 'px"><span class="tg" data-act="toggle" data-id="' + id + '">' + (kc ? (isOpen(id) ? '▾' : '◂') : '·') + '</span>' +
+        '<span class="bk-i">' + esc(n.icon || KIND_ICON[n.kind]) + '</span><span class="kb2 ' + n.kind + '">' + E.KIND[n.kind] + '</span><span class="tt" data-act="pick" data-id="' + id + '">' + esc(n.title) + '</span>' +
+        statusPill(v.status || n.status) + '<span style="width:70px">' + bar(v.progress) + '</span><span class="sm mut" style="width:46px">' + FA(v.progress || 0) + '٪</span>' +
+        '<span class="sm mut" style="width:54px">' + (v.dur ? num(v.dur) + ' روز' : '') + '</span><span class="sm mut" style="width:84px">⏱ ' + fmtDur(nodeTime(id)) + '</span>' +
+        (ed ? '<span class="row" style="gap:2px;flex-wrap:nowrap">' + (cnt ? '<button class="btn sm ghost" title="زیربخشِ جدید" data-act="addnode" data-parent="' + id + '">＋</button>' : '') +
+        '<button class="btn sm ghost" title="بالاتر" data-act="mv" data-id="' + id + '" data-d="up">↑</button><button class="btn sm ghost" title="پایین‌تر" data-act="mv" data-id="' + id + '" data-d="down">↓</button>' +
+        '<button class="btn sm ghost" title="تورفتگی (زیرِ بخشِ بالایی)" data-act="mv" data-id="' + id + '" data-d="in">⇥</button><button class="btn sm ghost" title="یک سطح بیرون" data-act="mv" data-id="' + id + '" data-d="out">⇤</button></span>' : '') + '</div>');
+      if (kc && isOpen(id)) walk(id);
+    });
+  })(0);
+  var rk = childKindsOf(null);
+  return '<div class="row" style="margin-bottom:10px">' + (ed && rk.length ? '<button class="btn pri" data-act="addnode" data-parent="0">＋ ' + KIND_ICON[rk[0]] + ' ' + E.KIND[rk[0]] + ' جدید</button>' : '') +
+    '<button class="btn" data-act="expand" data-v="1">باز کردن همه</button><button class="btn" data-act="expand" data-v="0">بستن همه</button>' + (ed ? '' : '<span class="pill s st-hold">حالتِ مشاهده</span>') + '</div>' +
+    (rows.length ? '<div class="tree card" style="padding:0;overflow:hidden">' + rows.join('') + '</div>' : '<div class="card empty">هنوز بخشی نیست.</div>');
+}
+
 function msDialog(m) {
   m = m || {};
   modal({ title: m.id ? 'ویرایش نقطهٔ عطف' : 'نقطهٔ عطف (تایم‌استون)', body: '<label class="f"><span>عنوان</span><input name="title" value="' + esc(m.title || '') + '" required></label>' +
@@ -749,61 +1029,125 @@ function demoImage() {
     } catch (e) { res(null); }
   });
 }
+/* سازنده‌های کوچکِ دمو */
+function dN(id, parent, kind, title, o) {
+  o = o || {};
+  var n = { id: id, parent: parent, kind: kind, title: title };
+  for (var k in o) n[k] = o[k];
+  if (o.ins) { n.inputs = o.ins.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.ins; }
+  if (o.outs) { n.outputs = o.outs.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.outs; }
+  return n;
+}
+function dF(nodes, edges) {
+  return { v: 1, nodes: nodes.map(function (a) { return { id: a[0], type: a[1], text: a[2], x: a[3], y: a[4], w: a[5] || (a[1] === 'decision' ? 180 : a[1] === 'start' || a[1] === 'end' ? 140 : 170), h: a[6] || (a[1] === 'decision' ? 104 : a[1] === 'start' || a[1] === 'end' ? 52 : 64), color: null }; }),
+    edges: edges.map(function (e, i) { return { id: 'e' + (i + 1), from: e[0], to: e[1], label: e[2] || '', color: null }; }) };
+}
+function demoFlows() {
+  return {
+    login: dF([['s', 'start', 'شروع', 200, 0], ['i', 'io', 'دریافتِ ایمیل و رمز', 185, 100], ['c', 'process', 'یافتنِ کاربر در پایگاه‌داده', 185, 205], ['d', 'decision', 'رمز درست است؟', 180, 315],
+      ['ok', 'process', 'ساختِ نشست و ثبتِ ورود', 480, 335], ['bad', 'process', 'شمارشِ تلاشِ ناموفق', -110, 335], ['lim', 'decision', 'بیش از ۵ بار؟', -115, 460], ['lock', 'process', 'قفلِ موقتِ حساب', -110, 600], ['e', 'end', 'پایان', 500, 480]],
+      [['s', 'i'], ['i', 'c'], ['c', 'd'], ['d', 'ok', 'بله'], ['d', 'bad', 'خیر'], ['bad', 'lim'], ['lim', 'lock', 'بله'], ['lim', 'e', 'خیر'], ['ok', 'e']]),
+    pay: dF([['s', 'start', 'سبدِ تأییدشده', 220, 0], ['t', 'sub', 'ساختِ تراکنش', 205, 100], ['db', 'db', 'ذخیرهٔ تراکنش', 500, 90, 130, 84], ['g', 'process', 'هدایت به درگاه', 205, 215], ['u', 'io', 'بازگشت از درگاه', 200, 320], ['v', 'decision', 'پرداخت موفق؟', 200, 430, 180, 104],
+      ['ok', 'process', 'ثبت سفارش و پیامک', 500, 450], ['no', 'process', 'نمایشِ خطا و تلاشِ دوباره', -110, 450], ['n', 'note', 'تأییدِ نهایی حتماً با verify سمتِ سرور', 500, 570, 200, 90], ['e', 'end', 'پایان', 215, 600]],
+      [['s', 't'], ['t', 'db'], ['t', 'g'], ['g', 'u'], ['u', 'v'], ['v', 'ok', 'بله'], ['v', 'no', 'خیر'], ['ok', 'e']])
+  };
+}
+/* ماژول‌های کتابخانه */
+function libDemoDoc() {
+  var fl = demoFlows(), N = dN;
+  return { nodes: [
+    N('L1', null, 'module', 'ورود کاربر', { icon: '🔐', color: '#7a5af8', summary: 'اعتبارسنجی، نشست و محدودیتِ تلاش', ins: [['ایمیل'], ['رمز']], outs: [['نشست کاربر'], ['سطح دسترسی']], process: 'ایمیل و رمز اعتبارسنجی می‌شود؛ در صورتِ درستی نشستِ امن ساخته می‌شود.', est_days: 4 }),
+    N('L1s1', 'L1', 'section', 'اعتبارسنجی', { icon: '🛡️' }),
+    N('L1t1', 'L1s1', 'task', 'بررسیِ رمز', { ins: [['ایمیل و رمز']], outs: [['نتیجهٔ بررسی']], flow: fl.login, process: 'رمزِ واردشده با هشِ ذخیره‌شده مقایسه می‌شود؛ اگر نادرست بود شمارندهٔ تلاش بالا می‌رود و بیش از ۵ بار حساب قفل می‌شود.', est_days: 1.5 }),
+    N('L1t2', 'L1s1', 'task', 'محدودیتِ تلاش', { ins: [['تعدادِ تلاش']], outs: [['وضعیتِ قفل']], est_days: 1 }),
+    N('L1t3', 'L1', 'task', 'ساختِ نشست', { ins: [['کاربرِ معتبر']], outs: [['کوکیِ نشست']], est_days: 1 }),
+    N('L2', null, 'module', 'پرداختِ آنلاین', { icon: '💳', color: '#d64545', summary: 'اتصال به درگاه و تأییدِ پرداخت', ins: [['مبلغ'], ['اقلامِ سبد']], outs: [['وضعیتِ پرداخت']], process: 'تراکنش ساخته می‌شود، کاربر به درگاه می‌رود و پس از بازگشت، پرداخت سمتِ سرور تأیید می‌شود.', est_days: 6 }),
+    N('L2t1', 'L2', 'task', 'ساختِ تراکنش', { ins: [['مبلغ']], outs: [['شناسهٔ تراکنش']], est_days: 1 }),
+    N('L2t2', 'L2', 'task', 'درگاه و بازگشت', { ins: [['شناسهٔ تراکنش']], outs: [['نتیجهٔ درگاه']], flow: fl.pay, est_days: 3 }),
+    N('L2t3', 'L2', 'task', 'تأییدِ سمتِ سرور', { ins: [['نتیجهٔ درگاه']], outs: [['وضعیتِ پرداخت']], est_days: 1 }),
+    N('L3', null, 'module', 'اعلانِ پیامکی', { icon: '🔔', color: '#14a3a3', summary: 'ارسالِ پیامک با تلاشِ دوباره', ins: [['شماره'], ['متن']], outs: [['وضعیتِ ارسال']], est_days: 3 }),
+    N('L3t1', 'L3', 'task', 'ارسال با تلاشِ دوباره', { ins: [['پیام']], outs: [['وضعیتِ ارسال']], est_days: 2 })],
+    dependencies: [{ from: 'L1t1', to: 'L1t3', out: 'نتیجهٔ بررسی', 'in': 'کاربرِ معتبر', label: 'اگر درست بود' }, { from: 'L1t1', to: 'L1t2', out: 'نتیجهٔ بررسی', 'in': 'تعدادِ تلاش' },
+      { from: 'L2t1', to: 'L2t2', out: 'شناسهٔ تراکنش', 'in': 'شناسهٔ تراکنش' }, { from: 'L2t2', to: 'L2t3', out: 'نتیجهٔ درگاه', 'in': 'نتیجهٔ درگاه' }] };
+}
+/* پروژهٔ دمو (بدونِ ماژول‌های کتابخانه — آن‌ها پس از ایمپورت درج می‌شوند) */
 function sampleDoc() {
-  var T = J.today(), D = function (n) { return J.dayToIso(T + n); };
-  function N(id, parent, kind, title, o) {
-    o = o || {};
-    var n = { id: id, parent: parent, kind: kind, title: title };
-    for (var k in o) n[k] = o[k];
-    if (o.ins) { n.inputs = o.ins.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.ins; }
-    if (o.outs) { n.outputs = o.outs.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.outs; }
-    return n;
-  }
-  function F(nodes, edges) {
-    return { v: 1, nodes: nodes.map(function (a) { return { id: a[0], type: a[1], text: a[2], x: a[3], y: a[4], w: a[5] || (a[1] === 'decision' ? 180 : a[1] === 'start' || a[1] === 'end' ? 140 : 170), h: a[6] || (a[1] === 'decision' ? 104 : a[1] === 'start' || a[1] === 'end' ? 52 : 64), color: null }; }),
-      edges: edges.map(function (e, i) { return { id: 'e' + (i + 1), from: e[0], to: e[1], label: e[2] || '', color: null }; }) };
-  }
-  var loginFlow = F([['s', 'start', 'شروع', 200, 0], ['i', 'io', 'دریافتِ ایمیل و رمز', 185, 100], ['c', 'process', 'یافتنِ کاربر در پایگاه‌داده', 185, 205], ['d', 'decision', 'رمز درست است؟', 180, 315],
-    ['ok', 'process', 'ساختِ نشست و ثبتِ ورود', 470, 335], ['bad', 'process', 'شمارشِ تلاشِ ناموفق', -90, 335], ['lim', 'decision', 'بیش از ۵ بار؟', -95, 450], ['lock', 'process', 'قفلِ موقتِ حساب', -95, 580], ['e', 'end', 'پایان', 490, 460]],
-    [['s', 'i'], ['i', 'c'], ['c', 'd'], ['d', 'ok', 'بله'], ['d', 'bad', 'خیر'], ['bad', 'lim'], ['lim', 'lock', 'بله'], ['lim', 'i', 'خیر'], ['ok', 'e']]);
-  var payFlow = F([['s', 'start', 'سبدِ تأییدشده', 220, 0], ['t', 'sub', 'ساختِ تراکنش', 205, 100], ['db', 'db', 'ذخیرهٔ تراکنش', 480, 90, 130, 84], ['g', 'process', 'هدایت به درگاه', 205, 205], ['u', 'io', 'بازگشت از درگاه', 200, 310], ['v', 'decision', 'پرداخت موفق؟', 200, 410, 180, 104],
-    ['ok', 'process', 'ثبت سفارش و پیامک', 480, 430], ['no', 'process', 'نمایشِ خطا و تلاشِ دوباره', -80, 430], ['n', 'note', 'تأییدِ نهایی حتماً با فراخوانیِ verify سمتِ سرور', 480, 540, 200, 90], ['e', 'end', 'پایان', 495, 660]],
-    [['s', 't'], ['t', 'db'], ['t', 'g'], ['g', 'u'], ['u', 'v'], ['v', 'ok', 'بله'], ['v', 'no', 'خیر'], ['ok', 'e'], ['n', 'ok']]);
+  var T = J.today(), D = function (n) { return J.dayToIso(T + n); }, N = dN, fl = demoFlows();
   var nodes = [
-    N('a', null, 'section', 'هسته و زیرساخت', { icon: '🏗️', color: '#64748b', x: 560, y: 190, summary: 'پایگاه‌داده، کاربران و دسترسی‌ها' }),
-    N('a1', 'a', 'module', 'طراحیِ پایگاه‌داده', { icon: '🗄️', color: '#2f6fed', x: 330, y: 40, summary: 'جدول‌ها، رابطه‌ها و مهاجرت‌ها', status: 'done', progress: 100, final_days: 3, start_date: D(-12), assignee: 'سارا', tags: 'پایگاه‌داده',
-      ins: [['فهرست موجودیت‌ها', 'کاربر، محصول، سفارش…']], outs: [['اسکیمای SQL', 'فایلِ مهاجرت']], process: 'مدل‌سازی ER، نرمال‌سازی تا ۳NF، ساختِ مهاجرت‌ها و دادهٔ اولیه.',
-      details: 'همهٔ جدول‌ها کلیدِ اصلی عددی دارند. حذفِ نرم (soft delete) برای سفارش و محصول.', tech: 'MySQL 8 · utf8mb4 · ایندکس روی slug و created_at' }),
-    N('a2', 'a', 'module', 'کاربران و ورود', { icon: '🔐', color: '#7a5af8', x: 40, y: 40, summary: 'ثبت‌نام، ورود، بازیابیِ رمز', status: 'doing', progress: 60, est_days: 4, final_days: 5, start_date: D(-9), assignee: 'علی', priority: 1,
-      ins: [['اسکیمای SQL'], ['ایمیل و رمز', 'از فرم ورود']], outs: [['نشست کاربر', 'کوکیِ امن'], ['سطح دسترسی', 'نقش‌های کاربر']], process: 'اعتبارسنجی، مقایسهٔ هشِ رمز، ساختِ نشست و محدودیتِ تلاش.',
-      details: 'رمزها با bcrypt هش می‌شوند. پس از ۵ تلاشِ ناموفق حساب ۱۵ دقیقه قفل می‌شود.', tech: 'password_hash · نشستِ HttpOnly · CSRF', flow: loginFlow }),
-    N('a3', 'a', 'task', 'نقش‌ها و مجوزها', { icon: '🛡️', color: '#e0558a', x: 40, y: 240, summary: 'مدیر، کارمند، مشتری', status: 'todo', est_days: 2, ins: [['سطح دسترسی']], outs: [['قواعدِ مجوز']] }),
-    N('b', null, 'section', 'کاتالوگ', { icon: '🛍️', color: '#1f9d63', x: 270, y: 20, summary: 'محصولات و جست‌وجو' }),
-    N('b1', 'b', 'module', 'مدیریتِ محصول', { icon: '📦', x: 40, y: 60, summary: 'ساخت و ویرایشِ محصول با تصویر', status: 'review', progress: 90, est_days: 5, final_days: 6, assignee: 'مریم', tags: 'پنل',
-      ins: [['اسکیمای SQL'], ['سطح دسترسی']], outs: [['فهرست محصولات']], process: 'فرمِ محصول، آپلودِ تصویر، تنوع (رنگ/سایز) و موجودی.' }),
-    N('b2', 'b', 'module', 'جست‌وجو و فیلتر', { icon: '🔍', x: 340, y: 60, summary: 'جست‌وجوی سریع با فیلترها', status: 'todo', est_days: 4, ins: [['فهرست محصولات']], outs: [['نتایجِ مرتب']], process: 'نمایه‌سازی عنوان و برچسب، رتبه‌بندی و صفحه‌بندی.' }),
-    N('c', null, 'section', 'خرید', { icon: '🛒', color: '#e0912b', x: 0, y: 190, summary: 'سبد، پرداخت و سفارش' }),
-    N('c1', 'c', 'module', 'سبدِ خرید', { icon: '🧺', x: 40, y: 80, summary: 'افزودن، حذف و تغییرِ تعداد', status: 'todo', est_days: 3, ins: [['فهرست محصولات'], ['نشست کاربر']], outs: [['اقلامِ سبد']] }),
-    N('c2', 'c', 'module', 'پرداختِ آنلاین', { icon: '💳', color: '#d64545', x: 340, y: 80, summary: 'اتصال به درگاه و تأیید', status: 'todo', est_days: 6, priority: 1, ins: [['اقلامِ سبد']], outs: [['وضعیتِ پرداخت']],
-      process: 'ساختِ تراکنش، هدایت به درگاه، بازگشت و تأییدِ سمتِ سرور.', tech: 'cURL · تأییدِ verify · ذخیرهٔ شناسهٔ ارجاع', flow: payFlow }),
-    N('c3', 'c', 'module', 'ثبت و پیگیریِ سفارش', { icon: '📋', x: 640, y: 80, summary: 'چرخهٔ سفارش و پیامک', status: 'todo', est_days: 5, ins: [['وضعیتِ پرداخت'], ['اقلامِ سبد']], outs: [['سفارش'], ['پیامکِ وضعیت']] }),
-    N('d', null, 'module', 'اعلان‌ها', { icon: '🔔', color: '#14a3a3', x: -290, y: 190, summary: 'پیامک و ایمیل', status: 'todo', est_days: 3, ins: [['سفارش']], outs: [['پیامک/ایمیل به مشتری']], process: 'صفِ ارسال با تلاشِ دوباره.' }),
-    N('e', null, 'module', 'پنلِ مدیریت', { icon: '📊', color: '#7a5af8', x: -290, y: 20, summary: 'گزارشِ فروش و مدیریت', status: 'todo', est_days: 8, ins: [['سفارش'], ['فهرست محصولات']], outs: [['گزارشِ فروش']] })
-  ];
-  return { project: { name: 'دمو: فروشگاه اینترنتیِ بزرگ', description: 'پروژهٔ نمونه با همهٔ امکاناتِ Milo: بلوک‌های رنگی و آیکن‌دار، پیوند با برچسب، فلوچارت، زمان‌بندی، نقطهٔ عطف، گزارش و پیوست. هر وقت خواستید پاکش کنید.',
+    N('A', null, 'area', 'هسته و زیرساخت', { icon: '🏗️', color: '#2f6fed', x: 760, y: 280, summary: 'پایگاه‌داده، ورود و دسترسی‌ها', ins: [['نیازمندی‌ها']], outs: [['اسکیمای SQL'], ['نشست کاربر']] }),
+    N('A1', 'A', 'section', 'پایگاه‌داده', { icon: '🗄️' }),
+    N('A1m', 'A1', 'module', 'طراحیِ اسکیما', { icon: '🧩', summary: 'جدول‌ها، رابطه‌ها و مهاجرت‌ها', ins: [['نیازمندی‌ها']], outs: [['اسکیمای SQL']], process: 'مدل‌سازی ER، نرمال‌سازی تا ۳NF و نوشتنِ مهاجرت‌ها.', tech: 'MySQL 8 · utf8mb4 · حذفِ نرم برای سفارش و محصول', status: 'doing', progress: 85 }),
+    N('A1t1', 'A1m', 'task', 'مدلِ ER', { icon: '✔️', summary: 'نمودارِ موجودیت‌ها', ins: [['نیازمندی‌ها']], outs: [['نمودارِ ER']], status: 'done', progress: 100, final_days: 2, start_date: D(-12), assignee: 'سارا', details: 'کاربر، محصول، سفارش، پرداخت و رابطه‌هایشان.', process: 'از فهرستِ نیازمندی‌ها موجودیت‌ها و ارتباط‌ها استخراج و نرمال‌سازی می‌شود.' }),
+    N('A1t2', 'A1m', 'task', 'نوشتنِ مهاجرت‌ها', { icon: '✔️', summary: 'فایل‌های SQL', ins: [['نمودارِ ER']], outs: [['اسکیمای SQL']], status: 'doing', progress: 70, est_days: 2, final_days: 2.5, start_date: D(-10), assignee: 'سارا' }),
+    N('A2', 'A', 'section', 'احراز هویت', { icon: '🔑' }),
+    N('A2t', 'A2', 'task', 'صفحهٔ ورود (UI)', { icon: '✔️', summary: 'فرمِ ورود و بازیابیِ رمز', ins: [['نشست کاربر']], outs: [['صفحهٔ ورود']], est_days: 2, status: 'todo' }),
+    N('B', null, 'area', 'کاتالوگ', { icon: '🛍️', color: '#1f9d63', x: 330, y: 20, summary: 'محصولات و جست‌وجو', ins: [['اسکیمای SQL']], outs: [['فهرست محصولات']] }),
+    N('B1', 'B', 'section', 'محصول', { icon: '📦' }),
+    N('B1m', 'B1', 'module', 'مدیریتِ محصول', { icon: '📦', summary: 'ساخت و ویرایشِ محصول با تصویر', ins: [['اسکیمای SQL'], ['سطحِ دسترسی']], outs: [['فهرست محصولات']], process: 'فرمِ محصول، تنوع (رنگ/سایز)، موجودی و آپلودِ تصویر.', status: 'review', progress: 90, assignee: 'مریم' }),
+    N('B1t1', 'B1m', 'task', 'فرمِ محصول', { icon: '✔️', ins: [['اسکیمای SQL']], outs: [['محصولِ ذخیره‌شده']], status: 'done', progress: 100, final_days: 2, start_date: D(-3) }),
+    N('B1t2', 'B1m', 'task', 'آپلودِ تصویر', { icon: '✔️', ins: [['فایلِ تصویر']], outs: [['نشانیِ تصویر']], status: 'review', progress: 80, est_days: 2 }),
+    N('B1n', 'B1', 'module', 'جست‌وجو و فیلتر', { icon: '🔍', summary: 'جست‌وجوی سریع با فیلترها', ins: [['فهرست محصولات']], outs: [['نتایجِ مرتب']], est_days: 4, status: 'todo', process: 'نمایه‌سازیِ عنوان/برچسب، رتبه‌بندی و صفحه‌بندی.' }),
+    N('C', null, 'area', 'خرید', { icon: '🛒', color: '#e0912b', x: -80, y: 280, summary: 'سبد، پرداخت و سفارش', ins: [['فهرست محصولات'], ['نشست کاربر']], outs: [['سفارش']] }),
+    N('C1', 'C', 'module', 'سبدِ خرید', { icon: '🧺', summary: 'افزودن، حذف و تغییرِ تعداد', ins: [['فهرست محصولات'], ['نشست کاربر']], outs: [['اقلامِ سبد']], est_days: 3 }),
+    N('C1t1', 'C1', 'task', 'افزودن به سبد', { icon: '✔️', ins: [['محصول و تعداد']], outs: [['اقلامِ سبد']], est_days: 1.5 }),
+    N('C3', 'C', 'module', 'ثبت و پیگیریِ سفارش', { icon: '📋', summary: 'چرخهٔ سفارش', ins: [['وضعیتِ پرداخت'], ['اقلامِ سبد']], outs: [['سفارش'], ['پیامکِ وضعیت']], est_days: 5, process: 'پس از پرداختِ موفق سفارش ساخته و وضعیتش تا تحویل دنبال می‌شود.' }),
+    N('D', null, 'area', 'اعلان‌ها', { icon: '🔔', color: '#14a3a3', x: -520, y: 340, summary: 'پیامک و ایمیل', ins: [['سفارش']], outs: [['پیام به مشتری']] }),
+    N('D1', 'D', 'module', 'پیامکِ وضعیت', { icon: '💬', ins: [['سفارش']], outs: [['پیام']], est_days: 2 }),
+    N('E', null, 'area', 'پنلِ مدیریت', { icon: '📊', color: '#7a5af8', x: -520, y: 40, summary: 'گزارش و مدیریت', ins: [['سفارش'], ['فهرست محصولات']], outs: [['گزارشِ فروش']] }),
+    N('E1', 'E', 'module', 'گزارشِ فروش', { icon: '📈', ins: [['سفارش']], outs: [['گزارش']], est_days: 6 })];
+  return { project: { name: 'دمو: فروشگاه اینترنتیِ بزرگ', description: 'پروژهٔ نمونه با همهٔ امکاناتِ Milo: سلسله‌مراتبِ بخش کلی ← بخش ← ماژول ← کار، پورت‌های ورودی/خروجی، ماژول‌های کتابخانه، فلوچارت، زمان‌بندی، نقطهٔ عطف، گزارش و پیوست. هر وقت خواستید پاکش کنید.',
       start_date: D(-12), target_date: D(70), ai_brief: 'PHP 8 + MySQL روی cPanel؛ رابطِ فارسی و راست‌به‌چپ؛ بدونِ کتابخانهٔ سنگین؛ همهٔ متن‌ها فارسی.' },
     nodes: nodes,
     dependencies: [
-      { from: 'a', to: 'b', label: 'اسکیمای SQL' }, { from: 'b', to: 'c', label: 'فهرست محصولات' }, { from: 'c', to: 'd', label: 'سفارش' }, { from: 'c', to: 'e', label: 'سفارش‌ها' }, { from: 'b', to: 'e', label: 'محصولات' },
-      { from: 'a1', to: 'a2', label: 'اسکیمای SQL' }, { from: 'a2', to: 'a3', label: 'سطح دسترسی' }, { from: 'a1', to: 'b1', label: 'اسکیمای SQL' }, { from: 'a3', to: 'b1', label: 'مجوزها' },
-      { from: 'b1', to: 'b2', label: 'فهرست محصولات' }, { from: 'b1', to: 'c1', label: 'فهرست محصولات' }, { from: 'a2', to: 'c1', label: 'نشست کاربر' },
-      { from: 'c1', to: 'c2', label: 'اقلامِ سبد' }, { from: 'c2', to: 'c3', label: 'وضعیتِ پرداخت' }],
+      { from: 'A', to: 'B', label: 'اسکیمای SQL', out: 'اسکیمای SQL', 'in': 'اسکیمای SQL' }, { from: 'B', to: 'C', label: '', out: 'فهرست محصولات', 'in': 'فهرست محصولات' }, { from: 'A', to: 'C', label: '', out: 'نشست کاربر', 'in': 'نشست کاربر' },
+      { from: 'C', to: 'D', out: 'سفارش', 'in': 'سفارش' }, { from: 'C', to: 'E', out: 'سفارش', 'in': 'سفارش' }, { from: 'B', to: 'E', out: 'فهرست محصولات', 'in': 'فهرست محصولات' },
+      { from: 'A1', to: 'A2', label: 'پایگاه‌داده ← ورود' }, { from: 'A1t1', to: 'A1t2', out: 'نمودارِ ER', 'in': 'نمودارِ ER' },
+      { from: 'B1m', to: 'B1n', out: 'فهرست محصولات', 'in': 'فهرست محصولات' }, { from: 'B1t1', to: 'B1t2', label: 'پس از ذخیره' },
+      { from: 'C1', to: 'C3', out: 'اقلامِ سبد', 'in': 'اقلامِ سبد' }],
     milestones: [{ title: 'پایانِ زیرساخت', date: D(8), note: 'دیتابیس و ورود آماده' }, { title: 'نسخهٔ آزمایشی', date: D(38) }, { title: 'انتشار', date: D(70), note: 'راه‌اندازی روی هاست' }],
     logs: [
-      { node: 'a1', kind: 'note', body: 'از ۳NF شروع کردیم؛ جدولِ تنوعِ محصول جدا شد تا موجودی هر تنوع مستقل باشد.', date: D(-10) },
-      { node: 'a2', kind: 'note', body: 'قفلِ حساب پس از ۵ تلاشِ ناموفق اضافه شد. هنوز بازیابیِ رمز مانده.', date: D(-3) },
+      { node: 'A1t1', kind: 'note', body: 'از ۳NF شروع کردیم؛ جدولِ تنوعِ محصول جدا شد تا موجودیِ هر تنوع مستقل باشد.', date: D(-10) },
+      { node: 'A1t2', kind: 'note', body: 'مهاجرتِ کاربران و محصولات نوشته شد؛ سفارش و پرداخت مانده.', date: D(-4) },
       { node: null, kind: 'note', body: 'جلسهٔ شروع: ترتیبِ ساخت = زیرساخت ← کاتالوگ ← خرید ← اعلان‌ها و پنل.', date: D(-12) }],
-    work_report: [{ node: 'a1', status: 'done', progress: 100, summary: 'اسکیمای پایگاه‌داده کامل شد.', how: 'مهاجرت‌های SQL به‌ترتیبِ وابستگی نوشته و روی نمونه اجرا شد.', files_changed: ['db/001_users.sql', 'db/002_catalog.sql', 'db/003_orders.sql'], decisions: ['حذفِ نرم برای سفارش و محصول', 'جدولِ تنوعِ جدا'], how_to_test: 'اجرای همهٔ مهاجرت‌ها روی دیتابیسِ خالی', remaining: '', actual_days: 3, date: D(-9) }] };
+    work_report: [{ node: 'B1t1', status: 'done', progress: 100, summary: 'فرمِ محصول کامل شد.', how: 'فرمِ چندمرحله‌ای با اعتبارسنجیِ سمتِ سرور.', files_changed: ['admin/product-form.php', 'inc/product.php'], decisions: ['ذخیرهٔ تنوع‌ها در جدولِ جدا'], how_to_test: 'ساختِ محصولِ دارای ۳ تنوع', remaining: '', actual_days: 2, date: D(-1) }] };
+}
+/* ساختنِ دمو: ۱) ماژول‌های کتابخانه ۲) پروژه ۳) درجِ ماژول‌ها از کتابخانه با پیوند ۴) عکس و زمانِ کار */
+function runSample() {
+  var libId = 0, pid = 0, libMods = {};
+  return api('library_list').then(function (j) {
+    libId = j.library_id;
+    var have = {}; j.modules.forEach(function (m) { have[m.title] = m.id; });
+    if (have['ورود کاربر']) return j;
+    return api('import', { mode: 'update', project_id: libId, doc: libDemoDoc() }).then(function () { return api('library_list'); });
+  }).then(function (j) {
+    j.modules.forEach(function (m) { libMods[m.title] = m.id; });
+    // یک ماژولِ مشتق در کتابخانه (ارث‌بری)
+    var p = libMods['پرداختِ آنلاین (بانک ملی)'] ? Promise.resolve() : api('node_copy', { src_node_id: libMods['پرداختِ آنلاین'], dst_project_id: libId, dst_parent_id: null, title: 'پرداختِ آنلاین (بانک ملی)', x: 320, y: 0 }).then(function (r) { libMods['پرداختِ آنلاین (بانک ملی)'] = r.id; });
+    return p;
+  }).then(function () { return api('import', { mode: 'new', doc: sampleDoc() }); }).then(function (r) {
+    pid = r.project_id;
+    return api('project_get', { project_id: pid });
+  }).then(function (P) {
+    var by = {}; P.nodes.forEach(function (n) { by[n.title] = n; });
+    var cp = function (libTitle, parentTitle, x, y) { return api('node_copy', { src_node_id: libMods[libTitle], dst_project_id: pid, dst_parent_id: by[parentTitle].id, x: x, y: y }); };
+    var ids = {};
+    return cp('ورود کاربر', 'احراز هویت', 0, 0).then(function (a) { ids.login = a.id; return cp('پرداختِ آنلاین (بانک ملی)', 'خرید', -330, 40); })
+      .then(function (b) { ids.pay = b.id; return Promise.all([
+        api('dep_save', { project_id: pid, from_id: by['سبدِ خرید'].id, to_id: ids.pay, out_name: 'اقلامِ سبد', in_name: 'اقلامِ سبد' }),
+        api('dep_save', { project_id: pid, from_id: ids.pay, to_id: by['ثبت و پیگیریِ سفارش'].id, out_name: 'وضعیتِ پرداخت', in_name: 'وضعیتِ پرداخت' })]); })
+      .then(function () {
+        var n = by['طراحیِ اسکیما'], t = by['مدلِ ER'];
+        var adds = [[t.id, 3600], [t.id, 1800], [n.id, 2400], [by['نوشتنِ مهاجرت‌ها'].id, 3600], [by['نوشتنِ مهاجرت‌ها'].id, 2700], [by['فرمِ محصول'].id, 3000], [0, 1500]];
+        return Promise.all(adds.map(function (a) { return api('time_add', { project_id: pid, node_id: a[0], seconds: a[1] }); }));
+      })
+      .then(function () { return demoImage(); })
+      .then(function (blob) {
+        var n = by['مدلِ ER']; if (!blob) return;
+        var fd = new FormData(); fd.append('project_id', pid); fd.append('node_id', n.id); fd.append('kind', 'note');
+        fd.append('body', 'نمودارِ ER (عکسِ نمونه — می‌توانید عکسِ خودتان را در کادرِ یادداشت Paste کنید)'); fd.append('files[]', blob, 'er-diagram.png');
+        return api('log_add', fd);
+      });
+  }).then(function () { return pid; });
 }
 
 /* ---------- به‌روزرسانی از گیت‌هاب ---------- */
@@ -838,7 +1182,7 @@ function updTick() {
   api('update_tick', {}).then(function (j) {
     S.updAvail = !!j.upd.available;
     if (j.r && j.r.updated) { toast('Milo به نسخهٔ ' + j.r.version + ' به‌روز شد؛ صفحه تازه می‌شود…'); setTimeout(function () { location.reload(); }, 1800); }
-    else { var t = $('.top'); if (t) t.outerHTML = S.P ? topBar() : homeTop(); }
+    else { var t = $('.menubar'); if (t) t.outerHTML = menuBar(); }
   }).catch(function () {});
 }
 
@@ -846,6 +1190,36 @@ function updTick() {
 function elId(el) { return +el.getAttribute('data-id'); }
 var ACTS = {
   noop: function () {},
+  menu: function (el, ev) {
+    var mm = el.closest('.mm'), was = mm.classList.contains('open');
+    $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });
+    if (!was) mm.classList.add('open');
+    ev.stopPropagation();
+  },
+  editstart: function () { startEdit(); },
+  editsave: function () { saveEdit(); },
+  editdiscard: function () { return discardEdit(); },
+  tool: function (el) {
+    if (!S.editing) return toast('برای ساختن، اول «✎ ویرایش» را بزنید', true);
+    if (el.getAttribute('data-off')) return toast('این ابزار در این سطح مجاز نیست — ' + (S.focus ? 'سطح‌بندی را در نوارِ قوانین ببینید' : 'در سطحِ اصلی فقط «بخش کلی» ساخته می‌شود'), true);
+    var k = el.getAttribute('data-kind'); S.tool = S.tool === k ? null : k; if (S.cv) S.cv.arm(S.tool); renderContent(true);
+    if (S.tool) toast('روی بوم کلیک کنید تا «' + (k === 'lib' ? 'ماژولِ کتابخانه' : E.KIND[k]) + '» قرار بگیرد');
+  },
+  openlib: function () { return openLibrary(); },
+  libinsert: function () { if (!needEdit()) return; return libPicker(function (m) { return insertFromLib(m.id); }); },
+  savelib: function (el) { var id = el && el.getAttribute && el.getAttribute('data-id') ? elId(el) : S.sel; if (id) saveToLib(id); },
+  derive: function (el) { var id = el && el.getAttribute && el.getAttribute('data-id') ? elId(el) : S.sel; if (id && needEdit()) deriveModule(id); },
+  revrestore: function (el) { if (!needEdit()) return; if (!confirm('ساختار به این نسخه برگردد؟ تغییراتِ بعد از آن از بین می‌رود.')) return; return api('revision_restore', { project_id: S.pid, id: elId(el) }).then(function () { toast('بازگردانی شد'); return reload(); }); },
+  help: function () {
+    modal({ title: '📖 راهنمای سریع', cls: 'wide', noOk: true, noFocus: true, body: '<div class="help">' +
+      '<h4>🏛️ ← 📂 ← 🧩 ← ✔️ سلسله‌مراتب</h4><ul><li><b>بخش کلی</b> فقط در سطحِ اصلیِ پروژه ساخته می‌شود و «بخش» و «ماژول» می‌گیرد.</li><li><b>بخش</b> می‌تواند بخش، ماژول و کار داشته باشد.</li><li><b>ماژول</b> ابزارِ قابلِ ذخیره است؛ ورودی/خروجی دارد و می‌تواند بخش، ماژولِ دیگر و کار داشته باشد.</li><li><b>کار</b> آخرین سطح است: یک ورودی، یک خروجی، فلوچارت، تصویر و توضیح — زیرمجموعه ندارد.</li></ul>' +
+      '<h4>✎ ویرایش / 💾 ذخیره</h4><p>پیش‌فرض «فقط مشاهده» است. «✎ ویرایش» را بزنید، تغییر دهید، با «💾 ذخیره» نسخه ثبت می‌شود و دوباره به مشاهده برمی‌گردید. «↩ لغو» همهٔ تغییراتِ آن نوبت را برمی‌گرداند.</p>' +
+      '<h4>📚 کتابخانهٔ ماژول‌ها</h4><p>ماژولی را «ذخیره در کتابخانه» کنید و در هر پروژه «درج» کنید؛ در کتابخانه می‌شود از ماژولی «مشتق» ساخت و تغییرش داد.</p>' +
+      '<h4>⏱ زمانِ طراحی</h4><p>وقتی در حالتِ ویرایش هستید و بخشی را انتخاب کرده‌اید، زمانِ فعال به آن بخش اضافه می‌شود؛ مجموعش در نوارِ پایین و تب «تاریخچه» است.</p></div>' });
+  },
+  shortcuts: function () {
+    modal({ title: '⌨️ میان‌برها', noOk: true, noFocus: true, body: '<table class="t"><tbody><tr><td>Ctrl+E</td><td>شروعِ ویرایش</td></tr><tr><td>Ctrl+S</td><td>ذخیره و پایانِ ویرایش</td></tr><tr><td>دوبار کلیک روی بوم</td><td>بلوکِ تازه</td></tr><tr><td>دوبار کلیک روی بلوک</td><td>بازکردنِ زیرمجموعه</td></tr><tr><td>Delete</td><td>حذفِ انتخاب‌شده</td></tr><tr><td>F2 / Enter</td><td>تغییرِ نام</td></tr><tr><td>Shift+کشیدن</td><td>انتخابِ چندتایی</td></tr><tr><td>چرخ ماوس</td><td>زوم</td></tr><tr><td>Esc</td><td>لغوِ ابزار / پاک‌کردنِ انتخاب</td></tr><tr><td>Ctrl+Z / Y</td><td>برگردان / از نو (فلوچارت)</td></tr></tbody></table>' });
+  },
   mapadd: function (el) { return createBlock(S.cv ? S.cv.centerOf() : { x: 0, y: 0 }, el.getAttribute('data-kind')); },
   mapzoom: function (el) { var v = el.getAttribute('data-v'); if (!S.cv) return; if (v === 'fit') S.cv.fit(); else S.cv.zoomBy(v === 'in' ? 1.25 : 0.8); },
   maplayout: function () {
@@ -855,7 +1229,9 @@ var ACTS = {
   },
   flowedit: function (el, ev, forId) {
     var id = forId || elId(el), n = S.idx.byId.get(id); if (!n) return;
-    FLOW.edit({ title: n.title, flow: n.flow, toast: toast,
+    var ro = !S.editing;
+    if (ro && !(n.flow && n.flow.nodes && n.flow.nodes.length)) return toast('این بخش فلوچارتی ندارد' + (ro ? ' — برای رسم «✎ ویرایش» را بزنید' : ''), true);
+    FLOW.edit({ title: n.title, flow: n.flow, toast: toast, readonly: ro,
       onSave: function (flow) { return api('node_save', { project_id: S.pid, id: id, flow: flow }).then(function () { toast('فلوچارت ذخیره شد'); return loadProject(S.pid); }); },
       onClose: function () { render(true); } });
   },
@@ -873,20 +1249,7 @@ var ACTS = {
       setup: function (f, close) { $('[data-del]', f).addEventListener('click', guard(function () { if (!confirm('پروژه «' + p.name + '» با همهٔ بخش‌ها، گزارش‌ها و پیوست‌ها برای همیشه پاک شود؟')) return; return api('project_delete', { project_id: S.pid }).then(function () { close(); S.P = null; S.pid = 0; location.hash = '#/'; }); })); },
       onok: function (f) { return saveProjectForm(f, S.pid).then(reload); } });
   },
-  sample: function () {
-    return api('import', { mode: 'new', doc: sampleDoc() }).then(function (r) {
-      var pid = r.project_id;
-      return api('project_get', { project_id: pid }).then(function (P) {
-        var n = P.nodes.filter(function (x) { return x.title === 'طراحیِ پایگاه‌داده'; })[0];
-        return demoImage().then(function (blob) {
-          if (!n || !blob) return;
-          var fd = new FormData(); fd.append('project_id', pid); fd.append('node_id', n.id); fd.append('kind', 'note');
-          fd.append('body', 'نمودارِ ER (عکسِ نمونه — شما می‌توانید عکسِ خودتان را در کادرِ یادداشت Paste کنید)'); fd.append('files[]', blob, 'er-diagram.png');
-          return api('log_add', fd);
-        });
-      }).then(function () { S.pid = 0; S.P = null; location.hash = '#/p/' + pid + '/map'; route(); });
-    });
-  },
+  sample: function () { toast('در حالِ ساختنِ دمو…'); return runSample().then(function (pid) { S.pid = 0; S.P = null; location.hash = '#/p/' + pid + '/map'; route(); }); },
   importnew: function () { var i = document.createElement('input'); i.type = 'file'; i.accept = '.json'; i.onchange = function () { if (i.files[0]) readImport(i.files[0], 0); }; i.click(); },
   pick: function (el) { var id = elId(el); if (!id) return; S.sel = id; S.drawerOpen = true; if (S.tab === 'map') S.focus = S.idx.parentOf(id); renderContent(true); renderDrawer(); },
   focus: function (el) { S.focus = elId(el); renderContent(); },
@@ -922,18 +1285,24 @@ var ACTS = {
   },
   clearsched: function () { if (!confirm('همهٔ تاریخ‌های شروعِ ثبت‌شده پاک شود (برنامه دوباره خودکار از وابستگی‌ها محاسبه می‌شود)؟')) return; var items = S.sch.order.filter(function (id) { return S.idx.byId.get(id).start_date; }).map(function (id) { return { id: id, start_date: null }; }); if (!items.length) return; return api('nodes_bulk', { project_id: S.pid, items: items }).then(reload); }
 };
+var MUT = { addnode: 1, mv: 1, delnode: 1, deldep: 1, addio: 1, rmrow: 1, addms: 1, editms: 1, dellog: 1, delfile: 1, savebrief: 1, fillest: 1, applysched: 1, clearsched: 1, flowdel: 1, maplayout: 1, editproject: 1 };
 document.addEventListener('click', function (e) {
+  if (!(e.target.closest && e.target.closest('.mm'))) $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });
   var dot = e.target.closest ? e.target.closest('#colpick .cv-dot') : null;
+  if (dot && !S.editing) return;
   if (dot) { var box = dot.parentNode; $$('.cv-dot', box).forEach(function (d) { d.classList.remove('on'); }); dot.classList.add('on'); $('[name=color]', box.parentNode).value = dot.getAttribute('data-c'); return; }
   var el = e.target.closest ? e.target.closest('[data-act]') : null;
   if (!el || el.tagName === 'INPUT' && el.type !== 'checkbox') return;
-  var fn = ACTS[el.getAttribute('data-act')]; if (!fn) return;
+  var an = el.getAttribute('data-act'), fn = ACTS[an]; if (!fn) return;
+  if (!(el.closest && el.closest('.mm-b'))) $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });
+  if (MUT[an] && !S.editing) { toast('برای تغییر، اول «✎ ویرایش» را بزنید', true); return; }
   if (el.type === 'checkbox') { guard(fn)(el, e); return; }
   guard(fn)(el, e);
 });
 document.addEventListener('submit', function (e) {
   var f = e.target; var kind = f.getAttribute('data-form'); if (!kind) return;
   e.preventDefault();
+  if ((kind === 'savenode' || kind === 'adddep' || kind === 'addlog') && !S.editing) { toast('برای تغییر، اول «✎ ویرایش» را بزنید', true); return; }
   guard(function () {
     if (kind === 'login' || kind === 'setup') {
       return api(kind, { username: $('[name=username]', f).value, password: $('[name=password]', f).value }).then(function (j) { S.user = j.user; S.csrf = j.csrf; S.needsSetup = false; route(); });
@@ -955,6 +1324,7 @@ document.addEventListener('submit', function (e) {
 });
 document.addEventListener('change', function (e) {
   var t = e.target, ch = t.getAttribute && t.getAttribute('data-chg');
+  if (!S.editing && (ch === 'upnode' || (t.getAttribute && (t.getAttribute('data-dlabel') || t.getAttribute('data-f'))))) { return; }
   if (t.name === 'progress' && t.type === 'range') { var pv = $('#pv'); if (pv) pv.textContent = FA(t.value); }
   if (ch === 'lognode') { S.logNode = t.value; renderContent(true); }
   else if (ch === 'logkind') { S.logKind = t.value; renderContent(true); }
@@ -963,7 +1333,7 @@ document.addEventListener('change', function (e) {
     Array.prototype.forEach.call(t.files, function (x) { fd.append('files[]', x, x.name); });
     guard(function () { return api('upload', fd).then(function () { toast('بارگذاری شد'); return reload(); }); })();
   } else if (t.getAttribute && t.getAttribute('data-dlabel')) {
-    guard(function () { return api('dep_save', { project_id: S.pid, from_id: +t.getAttribute('data-from'), to_id: +t.getAttribute('data-to'), label: t.value }).then(function () { toast('ذخیره شد'); return loadProject(S.pid); }); })();
+    guard(function () { return api('dep_save', { project_id: S.pid, from_id: +t.getAttribute('data-from'), to_id: +t.getAttribute('data-to'), label: t.value, out_name: t.getAttribute('data-on') || '', in_name: t.getAttribute('data-in') || '' }).then(function () { toast('ذخیره شد'); return loadProject(S.pid); }); })();
   } else if (t.getAttribute && t.getAttribute('data-f') && t.closest('tr')) {
     var row = t.closest('tr'), id = +row.getAttribute('data-id'), k = t.getAttribute('data-f'), val;
     if (k === 'start_date') { val = J.parse(t.value); if (val === undefined) { t.classList.add('bad'); return toast('تاریخ را مثل ۱۴۰۵/۰۸/۲۸ بنویسید', true); } t.classList.remove('bad'); }
@@ -980,6 +1350,13 @@ document.addEventListener('paste', function (e) {
   Array.prototype.forEach.call(inp.files, function (f) { dt.items.add(f); });
   imgs.forEach(function (f, i) { dt.items.add(new File([f], 'paste-' + Date.now() + '-' + i + '.png', { type: f.type })); });
   inp.files = dt.files; toast(FA(imgs.length) + ' تصویر به پیوست افزوده شد');
+});
+document.addEventListener('keydown', function (e) {
+  var meta = e.ctrlKey || e.metaKey;
+  if (e.key === 'Escape') $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });
+  if (!S.P || !S.user) return;
+  if (meta && (e.key === 'e' || e.key === 'E')) { e.preventDefault(); if (S.editing) toast('از قبل در حالتِ ویرایش هستید'); else startEdit(); }
+  else if (meta && (e.key === 's' || e.key === 'S') && S.editing && !document.querySelector('.fl-ov')) { e.preventDefault(); saveEdit(); }
 });
 window.addEventListener('hashchange', route);
 loadMe().then(function () { route(); setTimeout(updTick, 3000); setInterval(updTick, 10 * 60 * 1000); }).catch(function (e) { $('#app').innerHTML = '<div class="boot">خطا در اتصال به سرور: ' + esc(e.message) + '</div>'; });

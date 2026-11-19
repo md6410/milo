@@ -2,7 +2,7 @@
 (function (W) {
   var J = W.JAL;
   var STATUS = { todo: 'انجام‌نشده', doing: 'در حال انجام', review: 'در بازبینی', done: 'انجام‌شد', blocked: 'مسدود', hold: 'متوقف' };
-  var KIND = { section: 'بخش کلی', module: 'ماژول', task: 'جزئیات' };
+  var KIND = { area: 'بخش کلی', section: 'بخش', module: 'ماژول', task: 'کار' };
   var PRIO = { 1: 'بالا', 2: 'عادی', 3: 'پایین' };
 
   function build(P) {
@@ -138,6 +138,7 @@
   /* ---------- خروجی هوش مصنوعی ---------- */
   var AI_INSTRUCTIONS = [
     'This file is the complete specification of a software/project plan exported from "Project Manager" (schema weby-projectmanager/1).',
+    'HIERARCHY RULES (must be kept, the importer enforces them): kinds are area (بخش کلی), section (بخش), module (ماژول), task (کار). Top level (parent=null) contains ONLY areas. An area contains sections and modules. A section contains sections, modules and tasks. A module contains sections, modules (used inside it) and tasks. A task is the last level: it has NO children and exactly one input and one output. Areas, sections and modules may have several inputs/outputs. A dependency may name the ports it connects: {from,to,out:"<output name of from>",in:"<input name of to>"}. "src_name" marks a node copied from the shared module library - keep it.',
     'HOW TO READ IT: "nodes" is a tree ("parent" = id of the parent node, null = top level). kind=section groups things; kind=module is a unit of work with inputs, outputs and a process; kind=task is a concrete detail. "summary", "details", "process" and "tech" are the authoritative requirements. "dependencies" {from,to,label}: node "to" needs what node "from" produces (label = what flows between them), so build "from" first. "build_order" lists the leaf nodes in a suggested implementation order with phases (nodes in the same phase are independent). "project.ai_brief" holds the stack, conventions and constraints you must respect. "logs" is the history of notes and decisions; "files" lists attachments (names only).',
     'YOUR TASK: implement the project the way this plan describes it, following build_order unless the user says otherwise. Do not silently drift from the plan: if you must deviate, record it (see RULE 2).',
     'RULE 1 - STRUCTURE CHANGES: if you change the structure in any way (add, remove, rename or split nodes; change inputs/outputs/process; add or remove dependencies; change estimates or milestones) you MUST deliver an updated copy of THIS file in the same schema so the user can import it back. Keep every existing "id" unchanged. New nodes get a temporary string id such as "new-1" (usable as "parent" and in dependencies). To remove something set "deleted": true on it. Returning only the changed items is accepted; the full file is preferred. Never change "schema".',
@@ -151,7 +152,7 @@
     return { id: n.id, parent: n.parent_id || null, order: n.sort, kind: n.kind, title: n.title, summary: n.summary, details: n.details,
       inputs: n.inputs, outputs: n.outputs, process: n.process, tech: n.tech, priority: n.priority, status: n.status, progress: n.progress,
       est_days: n.est_days, final_days: n.final_days, start_date: n.start_date, done_date: n.done_date, assignee: n.assignee, tags: n.tags,
-      color: n.color || null, icon: n.icon || null, x: n.x == null ? null : n.x, y: n.y == null ? null : n.y, flow: n.flow || null };
+      src_name: n.src_name || null, color: n.color || null, icon: n.icon || null, x: n.x == null ? null : n.x, y: n.y == null ? null : n.y, flow: n.flow || null };
   }
 
   function buildExport(idx, sch) {
@@ -170,7 +171,7 @@
       project: { id: p.id, name: p.name, description: p.description, start_date: p.start_date, target_date: p.target_date, status: p.status, ai_brief: p.ai_brief },
       build_order: bo,
       nodes: P.nodes.map(function (n) { return nodeOut(idx, n); }),
-      dependencies: P.deps.map(function (d) { return { from: d.from_id, to: d.to_id, label: d.label }; }),
+      dependencies: P.deps.map(function (d) { return { from: d.from_id, to: d.to_id, label: d.label, out: d.out_name || null, 'in': d.in_name || null }; }),
       milestones: P.milestones.map(function (m) { return { id: m.id, title: m.title, date: m.date, done: !!m.done, note: m.note }; }),
       logs: P.logs.slice().reverse().map(function (l) { return { id: l.id, node: l.node_id, kind: l.kind, body: l.body, author: l.author, date: l.created_at }; }),
       files: P.files.map(function (f) { return { id: f.id, node: f.node_id, name: f.name, size: f.size }; }),
@@ -201,7 +202,7 @@
       if (n.flow && W.FLOW) { var mm = W.FLOW.mermaid(n.flow); if (mm) L.push('', '**فلوچارت:**', '', '```mermaid', mm, '```'); }
       if (n.tech) L.push('', '**نکات فنی:**', '', n.tech);
       var di = (idx.inn.get(id) || []);
-      if (di.length) { L.push('', '**وابسته به:**'); di.forEach(function (x) { L.push('- ' + idx.byId.get(x.from_id).title + ' `#' + x.from_id + '`' + (x.label ? ' (' + x.label + ')' : '')); }); }
+      if (di.length) { L.push('', '**وابسته به:**'); di.forEach(function (x) { L.push('- ' + idx.byId.get(x.from_id).title + ' `#' + x.from_id + '`' + ((x.out_name || x.in_name) ? ' [' + (x.out_name || '?') + ' ← ' + (x.in_name || '?') + ']' : '') + (x.label ? ' (' + x.label + ')' : '')); }); }
       L.push('');
     });
     return L.join('\n');

@@ -9,3 +9,7 @@
   and `api.php?a=me` (JSON containing `"csrf"`) working, or every update rolls back.
 - `data/` (database, uploads, update state) is never overwritten by updates.
 - JavaScript: no `?.` (older browsers). Before pushing: `php -l` all PHP files and `node --check assets/*.js`.
+
+- Hierarchy (enforced in `inc/db.php` `pm_child_kinds`, mirrored in `assets/app.js` `childKindsOf`): root → area; area → section, module;
+  section/module → section, module, task; task → nothing and has exactly one input/output. Change both places together.
+- Every mutating UI action must be gated by `S.editing` (see `MUT` in `app.js`); the DB migrations live in `pm_schema` (bump `user_version`).
