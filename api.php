@@ -142,7 +142,7 @@ try {
             if (pm_proj_kind($db, $pid) === 'library') fail('کتابخانهٔ ماژول‌ها پاک نمی‌شود');
             $needProject();
             pm_delete_files($db, 'project_id=?', [$pid]);
-            foreach (['deps', 'milestones', 'logs', 'tests', 'nodes', 'changes', 'revisions'] as $t) $db->prepare("DELETE FROM $t WHERE project_id=?")->execute([$pid]);
+            foreach (['deps', 'milestones', 'logs', 'tests', 'nodes', 'changes', 'revisions', 'routes'] as $t) $db->prepare("DELETE FROM $t WHERE project_id=?")->execute([$pid]);
             $db->prepare('DELETE FROM projects WHERE id=?')->execute([$pid]);
             out(['ok' => true]);
 
@@ -159,7 +159,17 @@ try {
                 'files' => $q('SELECT id,project_id,node_id,log_id,name,mime,size,created_at FROM files WHERE project_id=? ORDER BY id'),
                 'changes' => $q('SELECT * FROM changes WHERE project_id=? ORDER BY id DESC LIMIT 150'),
                 'revisions' => $q('SELECT id,project_id,note,summary,author,created_at FROM revisions WHERE project_id=? ORDER BY id DESC LIMIT 50'),
+                'routes' => $q('SELECT node_id,data FROM routes WHERE project_id=?'),
             ]);
+
+        case 'routes_save':   // node_id (۰ = سطحِ اصلی)، data: JSON مسیرها که «چیدمان خودکار» ساخته
+            $needProject();
+            $nid = (int)($in['node_id'] ?? 0);
+            $data = (string)($in['data'] ?? '');
+            if (strlen($data) > 4 * 1024 * 1024 || !is_array(json_decode($data, true))) fail('دادهٔ مسیرها نامعتبر است');
+            $db->prepare('INSERT OR REPLACE INTO routes(project_id,node_id,data,updated_at) VALUES(?,?,?,?)')
+               ->execute([$pid, $nid, $data, $now]);
+            out(['ok' => true]);
 
         // ---- کتابخانهٔ ماژول‌ها (پروژهٔ ویژه که همهٔ پروژه‌ها از آن استفاده می‌کنند)
         case 'library':

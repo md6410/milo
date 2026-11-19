@@ -46,7 +46,7 @@
   }
   /* هر شکلی که روی شکلِ دیگری افتاده، به پایین هل داده می‌شود (ترتیب و ستون‌ها حفظ می‌شود) */
   function separate(nodes, gap) {
-    gap = gap == null ? 70 : gap; /* ۷۰: دو خطِ صافِ خروج/ورود (۲۴) + راهرو */
+    gap = gap == null ? 100 : gap; /* ۷۰: دو خطِ صافِ خروج/ورود (۲۴) + راهرو */
     var L = nodes.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }), moved = false;
     for (var i = 1; i < L.length; i++) {
       var b = L[i], again = true, guard = 0;
@@ -69,38 +69,64 @@
     });
   }
   /* مسیرِ همهٔ پیکان‌ها با قاعدهٔ بوم (کوتاه‌تر اول، رزروِ سرها، بی‌هم‌پوشانی) ← {R, soft: شمارِ پیکان‌هایی که راهِ تمیز نیافتند} */
-  function routeAll(flow) {
+  function routeAll(flow, strict) {
     var nodes = flow.nodes || [], by = {}, idx = {};
     nodes.forEach(function (n, i) { by[n.id] = n; idx[n.id] = i; });
-    var obs = nodes.map(function (n) { return { l: n.x - 14, t: n.y - 14, r: n.x + n.w + 14, b: n.y + n.h + 14 }; }), used = [], R = [];
+    var obs = nodes.map(function (n) { return { l: n.x - 28, t: n.y - 28, r: n.x + n.w + 28, b: n.y + n.h + 28 }; }), used = [], R = [];
     (flow.edges || []).forEach(function (e) {
       var a = by[e.from], b = by[e.to]; if (!a || !b) return;
       var pa = e.fa ? CV.anchorAt(a, e.fa) : CV.anchor(a, e.ta ? CV.anchorAt(b, e.ta).x : b.x + b.w / 2, e.ta ? CV.anchorAt(b, e.ta).y : b.y + b.h / 2), pb = e.ta ? CV.anchorAt(b, e.ta) : CV.anchor(b, pa.x, pa.y);
       R.push({ e: e, pa: pa, pb: pb, len: Math.abs(pa.x - pb.x) + Math.abs(pa.y - pb.y), nets: [e.from + '>' + JSON.stringify(e.fa || ''), e.to + '<' + JSON.stringify(e.ta || '')] });
     });
     var ends = []; R.forEach(function (r) { var a = by[r.e.from], b = by[r.e.to], sa = (TYPES[a.type] || TYPES.process).shape, sb = (TYPES[b.type] || TYPES.process).shape;
-      ends.push({ it: { id: a.id, x: a.x, y: a.y, w: a.w, h: a.h, shape: sa }, p: r.pa, o: r.pb, fixed: !!r.e.fa }, { it: { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: sb }, p: r.pb, o: r.pa, fixed: !!r.e.ta }); });
+      ends.push({ it: { id: a.id, x: a.x, y: a.y, w: a.w, h: a.h, shape: sa }, p: r.pa, o: r.pb, dir: 'out', fixed: !!r.e.fa }, { it: { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, shape: sb }, p: r.pb, o: r.pa, dir: 'in', fixed: !!r.e.ta }); });
     CV.spreadAnchors(ends);
-    R.forEach(function (r) { r.pa.stub = r.pb.stub = 24; });
-    R.forEach(function (r) { r.nets = ['p' + Math.round(r.pa.x) + ',' + Math.round(r.pa.y), 'p' + Math.round(r.pb.x) + ',' + Math.round(r.pb.y)]; });
+    R.forEach(function (r) { r.pa.stub = r.pb.stub = 30; r.pa.lanes = 30; });
+    R.forEach(function (r) { r.nets = ['o' + Math.round(r.pa.x) + ',' + Math.round(r.pa.y), 'i' + Math.round(r.pb.x) + ',' + Math.round(r.pb.y)]; });
+    if (!strict) {
+      /* نمایش: مسیرِ ذخیره‌شده اگر سرهایش جور است؛ وگرنه مسیرِ سادهٔ فوری (بی‌برچسب) — هیچ مسیریابی‌ای */
+      R.forEach(function (r) {
+        var p = r.e.pts, ok = p && p.length > 1 && Math.abs(p[0][0] - r.pa.x) < 2 && Math.abs(p[0][1] - r.pa.y) < 2 && Math.abs(p[p.length - 1][0] - r.pb.x) < 2 && Math.abs(p[p.length - 1][1] - r.pb.y) < 2;
+        if (ok) { r.pts = p.map(function (q) { return { x: q[0], y: q[1] }; }); r.mid = r.e.mid ? { x: r.e.mid[0], y: r.e.mid[1], hide: !!r.e.hide } : null; }
+        else { r.pts = CV.quickRoute(r.pa, r.pb); r.mid = { x: 0, y: 0, hide: true }; }
+      });
+      return { R: R, soft: 0 };
+    }
     R.sort(function (x, y) { return x.len - y.len; });
     R.forEach(function (r) { CV.reserveStubs(r.pa, r.pb, used, r.nets); });
     var soft = 0;
-    R.forEach(function (r) { r.pts = CV.routeNet(r.pa, r.pb, obs, used, r.nets, [idx[r.e.from], idx[r.e.to]]); if (r.pts.soft) soft++; CV.recordRoute(r.pts, used, 24, 24, r.nets); });
+    R.forEach(function (r) { r.pts = CV.routeNet(r.pa, r.pb, obs, used, r.nets, [idx[r.e.from], idx[r.e.to]]); if (r.pts.soft) soft++; CV.recordRoute(r.pts, used, 30, 30, r.nets); });
     return { R: R, soft: soft };
   }
   /* اگر پیکانی جای تمیز ندارد، شکل‌ها از مرکز باز می‌شوند (×۱٫۳، حداکثر ۴ بار) تا هر خط راهروی خودش را بیابد */
-  function spread(flow) {
+  function spread(flow, noArrange) {
     var nodes = flow.nodes || [];
     if (nodes.length < 2 || nodes.length > 160) return false;
+    var orig = nodes.map(function (n) { return [n.x, n.y]; });
     for (var it = 0; it < 4; it++) {
-      if (!routeAll(flow).soft) return it > 0;
+      if (!routeAll(flow, true).soft) return it > 0;
       var cx = 0, cy = 0; nodes.forEach(function (n) { cx += n.x + n.w / 2; cy += n.y + n.h / 2; }); cx /= nodes.length; cy /= nodes.length;
       nodes.forEach(function (n) { n.x = Math.round(cx + (n.x + n.w / 2 - cx) * 1.3 - n.w / 2); n.y = Math.round(cy + (n.y + n.h / 2 - cy) * 1.3 - n.h / 2); });
     }
+    if (!routeAll(flow, true).soft) return true;
+    /* باز کردن کافی نبود (مثلاً ستونِ بلند): چیدمانِ خودکار و دوباره آزمون — هیچ پیکانی بی‌راهِ تمیز نمی‌ماند */
+    nodes.forEach(function (n, i) { n.x = orig[i][0]; n.y = orig[i][1]; });
+    if (noArrange) return true;
+    arrange(flow); separate(nodes);
+    spread(flow, true);
     return true;
   }
-  function tidy(flow) { var f = fontOf(), ch = false; (flow.nodes || []).forEach(function (n) { if (fitNode(n, f)) ch = true; }); align(flow); if (separate(flow.nodes || [])) ch = true; if (spread(flow)) ch = true; return ch; }
+  /* شکلی که پیکان‌های زیادی دارد آن‌قدر پهن می‌شود که هر پیکان نقطهٔ خودش را با ۱۶ فاصله داشته باشد */
+  function widen(flow) {
+    var deg = {}, ch = false;
+    (flow.edges || []).forEach(function (e) { deg[e.from] = deg[e.from] || { i: 0, o: 0 }; deg[e.to] = deg[e.to] || { i: 0, o: 0 }; deg[e.from].o++; deg[e.to].i++; });
+    (flow.nodes || []).forEach(function (n) { var d = deg[n.id]; if (!d || n.type === 'decision') return; var need = (Math.max(d.i, d.o) + 1) * 16; if (n.w < need) { n.x = Math.round(n.x - (need - n.w) / 2); n.w = need; ch = true; } });
+    return ch;
+  }
+  /* سبک (هنگامِ باز شدن): فقط اندازهٔ شکل‌ها از روی متن و جدا کردنِ هم‌پوشانی — بی‌مسیریابی */
+  function tidyLight(flow) { var f = fontOf(), ch = false; (flow.nodes || []).forEach(function (n) { if (fitNode(n, f)) ch = true; }); if (widen(flow)) ch = true; align(flow); if (separate(flow.nodes || [])) ch = true; return ch; }
+  /* کامل (فقط با «چیدمان خودکار»): همان + باز کردن تا هر پیکان راهِ تمیز داشته باشد */
+  function tidy(flow) { var ch = tidyLight(flow); if (spread(flow)) ch = true; return ch; }
   /* چیدمانِ لایه‌ای از بالا به پایین: ترتیب از روی پیکان‌ها، هر شکل زیرِ شکل‌های پیشینش */
   function arrange(flow) {
     var nodes = flow.nodes || [], edges = flow.edges || [], by = {}, out = {}, pre = {};
@@ -130,7 +156,9 @@
       row.forEach(function (n) { var x = Math.max(n._d - n.w / 2, right + GX); n.x = Math.round(x); right = x + n.w; want += n._d; got += x + n.w / 2; });
       var sh = Math.round((want - got) / row.length);
       var hmax = 0; row.forEach(function (n) { n.x += sh; n.y = y; cx[n.id] = n.x + n.w / 2; hmax = Math.max(hmax, n.h); delete n._d; });
-      y += hmax + GY;
+      /* فاصلهٔ این ردیف تا بعدی به اندازهٔ پیکان‌هایی که از آن می‌گذرند (هرکدام راهروی ۱۶) */
+      var cross = 0; fwd.forEach(function (p2) { if (layer[p2[0]] <= r && layer[p2[1]] > r) cross++; });
+      y += hmax + GY + 60 + 16 * Math.min(cross, 60);
     });
     /* شکل‌های بی‌پیکان (یادداشت‌ها) در ستونی کنارِ نمودار */
     var minx = 1e9; nodes.forEach(function (n) { if (layer[n.id] != null) minx = Math.min(minx, n.x); });
@@ -152,7 +180,7 @@
   function svgString(flow, opt) {
     opt = opt || {};
     if (!flow || !flow.nodes || !flow.nodes.length) return '';
-    flow = clone(flow); tidy(flow);
+    flow = clone(flow); tidyLight(flow);
     var nodes = flow.nodes, by = {}, minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9, P = 16;
     nodes.forEach(function (n) { by[n.id] = n; minx = Math.min(minx, n.x); miny = Math.min(miny, n.y); maxx = Math.max(maxx, n.x + n.w); maxy = Math.max(maxy, n.y + n.h); });
     var vb = [minx - P, miny - P, maxx - minx + P * 2, maxy - miny + P * 2];
@@ -163,11 +191,9 @@
     Object.keys(cols).forEach(function (c) { s += '<marker id="m' + c.replace('#', '') + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="' + c + '"/></marker>'; });
     s += '</defs>';
     if (bg) s += '<rect x="' + vb[0] + '" y="' + vb[1] + '" width="' + vb[2] + '" height="' + vb[3] + '" fill="' + bg + '"/>';
-    var R = routeAll(flow).R;
-    var rects = nodes.map(function (n) { return { l: n.x, t: n.y, r: n.x + n.w, b: n.y + n.h }; });
-    var mids = CV.placeLabels(R.map(function (r, i) { return { id: 'r' + i, pts: r.pts, text: r.e.label || '' }; }), rects), labels = '';
+    var R = routeAll(flow, false).R, labels = '';
     R.forEach(function (r, i) {
-      var e = r.e, col = e.color || '#7d88a3', d = CV.toPath(r.pts), mid = mids['r' + i] || CV.midOf(r.pts);
+      var e = r.e, col = e.color || '#7d88a3', d = CV.toPath(r.pts), mid = r.mid || CV.midOf(r.pts);
       s += '<path d="' + d + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" marker-end="url(#m' + col.replace('#', '') + ')"/>';
       if (e.label && mid.hide) s += '<title>' + esc(e.label) + '</title>';
       else if (e.label) { var lw = CV.textWidth(e.label, '12px Vazirmatn, Tahoma, sans-serif') + 18; labels += '<rect x="' + (mid.x - lw / 2) + '" y="' + (mid.y - 11) + '" width="' + lw + '" height="20" rx="10" fill="' + (bg || '#fff') + '" stroke="' + col + '"/><text x="' + mid.x + '" y="' + (mid.y + 4) + '" font-size="12" text-anchor="middle" fill="' + ink + '">' + esc(e.label) + '</text>'; }
@@ -204,7 +230,7 @@
   function edit(opt) {
     var data = opt.flow && opt.flow.nodes ? clone(opt.flow) : { v: 1, nodes: [], edges: [] };
     data.edges = data.edges || [];
-    tidy(data); /* شکل‌ها به اندازهٔ متنشان و بی‌هم‌پوشانی */
+    tidyLight(data); /* فقط اندازهٔ شکل‌ها از روی متن؛ مسیرها همان ذخیره‌شده‌اند (چیدن فقط با دکمه) */
     var hist = [JSON.stringify(data)], hi = 0, dirty = false, saving = false, cv = null, drop = 0;
     var RO = !!opt.readonly;
     var ov = document.createElement('div'); ov.className = 'fl-ov' + (RO ? ' ro' : '');
@@ -214,7 +240,7 @@
     }).join('');
     ov.innerHTML = '<div class="fl-top"><b class="fl-title">' + esc(opt.title || 'فلوچارت') + '</b><span class="fl-sp"></span>' +
       (RO ? '<span class="pill">فقط مشاهده — برای تغییر، «شروع ویرایش» را در برنامه بزنید</span>' : '<button class="btn sm" data-a="undo" title="Ctrl+Z">↶ برگردان</button><button class="btn sm" data-a="redo" title="Ctrl+Y">↷ از نو</button>') +
-      '<button class="btn sm" data-a="arrange" title="چیدمانِ مرتبِ خودکار از روی پیکان‌ها (بالا به پایین)">✨ چیدمان خودکار</button>' +
+      (RO ? '' : '<button class="btn sm" data-a="arrange" title="چیدن، مسیریابی و بررسیِ همهٔ قاعده‌ها — فقط یک بار؛ نتیجه با «ذخیره» می‌ماند">✨ چیدمان خودکار</button>') +
       '<button class="btn sm" data-a="zout">－</button><button class="btn sm" data-a="fit">جا بده</button><button class="btn sm" data-a="zin">＋</button>' +
       '<button class="btn sm" data-a="svg">⬇ تصویر SVG</button><button class="btn sm" data-a="mmd">کپی Mermaid</button>' +
       (RO ? '' : '<button class="btn sm pri" data-a="save">ذخیره</button><button class="btn sm" data-a="saveclose">ذخیره و بستن</button>') + '<button class="btn sm" data-a="close">✕ بستن</button></div>' +
@@ -308,7 +334,8 @@
       commit(); render(false);
     }
     var cnt = 0;
-    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO, freePoints: true, fitSide: 215, stub: 24,
+    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO, freePoints: true, fitSide: 215, stub: 30, lanes: 30,
+      saved: function () { var m = {}; data.edges.forEach(function (e) { if (e.pts) m[e.id] = { p: e.pts, m: e.mid || null, h: e.hide ? 1 : 0 }; }); return m; },
       onMove: function (list) { list.forEach(function (m) { var n = nodeById(m.id); if (n) { n.x = m.x; n.y = m.y; } }); commit(); },
       onAdd: function (p) { addNode('process', p.x, p.y, true); },
       onConnect: function (a, b, pa, pb, fa, ta) { addEdge(a.id, b.id, fa, ta); },
@@ -370,7 +397,15 @@
       var a = b.getAttribute('data-a');
       if (a === 'undo' && hi > 0) restore(hi - 1);
       else if (a === 'redo' && hi < hist.length - 1) restore(hi + 1);
-      else if (a === 'arrange') { if (!data.nodes.length) return; arrange(data); tidy(data); if (RO) render(false); else { commit(); render(false); } cv.fit(); }
+      else if (a === 'arrange' && !RO) {
+        if (!data.nodes.length) return;
+        arrange(data); tidy(data); render(false);
+        var rr = cv.arrange(), byN = {};
+        data.nodes.forEach(function (n) { byN[n.id] = n; });
+        rr.items.forEach(function (it) { var n = byN[it.id]; if (n) { n.x = Math.round(it.x); n.y = Math.round(it.y); } });
+        data.edges.forEach(function (e) { var g = rr.links[e.id]; if (g) { e.pts = g.p; e.mid = g.m; e.hide = g.h ? 1 : 0; } else { delete e.pts; delete e.mid; delete e.hide; } });
+        commit(); render(true); cv.fit();
+      }
       else if (a === 'zin') cv.zoomBy(1.2); else if (a === 'zout') cv.zoomBy(1 / 1.2); else if (a === 'fit') cv.fit();
       else if (a === 'save') save(false); else if (a === 'saveclose') save(true); else if (a === 'close') shut(false);
       else if (a === 'svg') { var s = svgString(data, { bg: '#ffffff' }); var l = document.createElement('a'); l.href = URL.createObjectURL(new Blob([s], { type: 'image/svg+xml' })); l.download = (opt.title || 'flowchart').replace(/[\\\/:*?"<>|\s]+/g, '_') + '.svg'; document.body.appendChild(l); l.click(); setTimeout(function () { URL.revokeObjectURL(l.href); l.remove(); }, 500); }

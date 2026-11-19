@@ -64,17 +64,34 @@
   var DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
   /* آیا قطعهٔ (x1,y1)-(x2,y2) روی خطِ دیگری (هم‌راستا و هم‌پوشان) می‌افتد؟ خط‌های هم‌شبکه (از یک پورت) مستثنا */
+  var GAP = 14; /* کمترین فاصلهٔ دو خطِ موازی */
   function sameNet(u, nets) { if (!nets || !u.nets) return false; for (var i = 0; i < nets.length; i++) if (nets[i] && u.nets.indexOf(nets[i]) >= 0) return true; return false; }
   function collide(x1, y1, x2, y2, used, nets) {
     for (var q = 0; q < used.length; q++) {
       var u = used[q]; if (sameNet(u, nets)) continue;
-      if (y1 === y2 && u.h && Math.abs(u.c - y1) < 8 && Math.min(Math.max(x1, x2), u.hi) - Math.max(Math.min(x1, x2), u.lo) > 1) return true;
-      if (x1 === x2 && !u.h && Math.abs(u.c - x1) < 8 && Math.min(Math.max(y1, y2), u.hi) - Math.max(Math.min(y1, y2), u.lo) > 1) return true;
+      if (y1 === y2 && u.h && Math.abs(u.c - y1) < GAP && Math.min(Math.max(x1, x2), u.hi) - Math.max(Math.min(x1, x2), u.lo) > 1) return true;
+      if (x1 === x2 && !u.h && Math.abs(u.c - x1) < GAP && Math.min(Math.max(y1, y2), u.hi) - Math.max(Math.min(y1, y2), u.lo) > 1) return true;
     }
     return false;
   }
   /* چند پیکان روی یک لبهٔ یک شکل (بی‌پورت): در طولِ لبه پخش می‌شوند، به ترتیبِ سمتِ دیگرشان (بی‌تقاطع) */
   function spreadAnchors(ends) {
+    /* لوزی: ورودی و خروجی هرگز از یک رأس نیستند؛ خروجی به رأسِ آزادِ رو به مقصد می‌رود */
+    var dm = {};
+    ends.forEach(function (E) { if (E && E.p && !E.fixed && E.it && E.it.shape === 'diamond') (dm[E.it.id] = dm[E.it.id] || []).push(E); });
+    Object.keys(dm).forEach(function (id) {
+      var L = dm[id], it = L[0].it, cx = it.x + it.w / 2, cy = it.y + it.h / 2;
+      var V = { t: { x: cx, y: it.y, nx: 0, ny: -1 }, b: { x: cx, y: it.y + it.h, nx: 0, ny: 1 }, l: { x: it.x, y: cy, nx: -1, ny: 0 }, r: { x: it.x + it.w, y: cy, nx: 1, ny: 0 } };
+      var key = function (p) { return p.nx + ':' + p.ny; }, use = {};
+      L.forEach(function (E) { var k = key(E.p); use[k] = use[k] || { in: 0, out: 0 }; use[k][E.dir === 'in' ? 'in' : 'out']++; });
+      L.forEach(function (E) {
+        if (E.dir === 'in') return;
+        var k = key(E.p); if (!use[k] || !use[k]['in']) return;
+        var best = null, bs = -1e9;
+        Object.keys(V).forEach(function (n) { var v = V[n], u = use[key(v)]; if (u && u['in']) return; var sc = v.nx * (E.o.x - cx) + v.ny * (E.o.y - cy); if (sc > bs) { bs = sc; best = v; } });
+        if (best) { use[k].out--; var nk = key(best); use[nk] = use[nk] || { in: 0, out: 0 }; use[nk].out++; E.p.x = best.x; E.p.y = best.y; E.p.nx = best.nx; E.p.ny = best.ny; }
+      });
+    });
     var g = {};
     ends.forEach(function (E) { if (!E || !E.p || E.fixed || !E.it || E.it.shape === 'diamond') return; var k = E.it.id + ':' + E.p.nx + ':' + E.p.ny; (g[k] = g[k] || []).push(E); });
     Object.keys(g).forEach(function (k) {
@@ -116,13 +133,13 @@
       for (var q = 0; q < v.length; q++) {
         o.push(v[q]);
         var g = q + 1 < v.length ? v[q + 1] - v[q] : 0;
-        if (g >= 36 || (fine && g >= 20)) { var n = fine ? Math.min(40, Math.floor(g / 10)) : Math.min(12, Math.floor(g / 18)); for (var z = 1; z < n; z++) o.push(Math.round(v[q] + g * z / n)); }
+        if (g >= 36 || (fine && g >= 20)) { var n = fine ? Math.min(60, Math.floor(g / 10)) : Math.min(a.lanes || 12, Math.floor(g / 16)); for (var z = 1; z < n; z++) o.push(Math.round(v[q] + g * z / n)); }
       }
       return o;
     }
     xs = lanes(xs); ys = lanes(ys);
     var nx = xs.length, ny = ys.length;
-    if (nx * ny > (fine ? 250000 : 40000)) return null;
+    if (nx * ny > (fine ? 300000 : 90000)) return null;
     var ix = {}, iy = {}; xs.forEach(function (v, k) { ix[v] = k; }); ys.forEach(function (v, k) { iy[v] = k; });
     var sI = ix[A.x], sJ = iy[A.y], tI = ix[B.x], tJ = iy[B.y];
     var freeMemo = {};
@@ -137,8 +154,8 @@
       var p = 0;
       for (var q = 0; q < used.length; q++) {
         var u = used[q]; if (sameNet(u, nets)) continue;
-        if (y1 === y2 && u.h && Math.abs(u.c - y1) < 6 && Math.max(x1, x2) > u.lo && Math.min(x1, x2) < u.hi) p += 400;
-        else if (x1 === x2 && !u.h && Math.abs(u.c - x1) < 6 && Math.max(y1, y2) > u.lo && Math.min(y1, y2) < u.hi) p += 400;
+        if (y1 === y2 && u.h && Math.abs(u.c - y1) < GAP && Math.max(x1, x2) > u.lo && Math.min(x1, x2) < u.hi) p += 400;
+        else if (x1 === x2 && !u.h && Math.abs(u.c - x1) < GAP && Math.max(y1, y2) > u.lo && Math.min(y1, y2) < u.hi) p += 400;
       }
       return p;
     }
@@ -349,7 +366,7 @@
       return { a: pa, b: pb, from: a, to: b };
     }
     /* هم‌شبکه = سرِ دقیقاً یکسان (شاخه‌شدنِ واقعی از یک نقطه)؛ دو خط که فقط به یک شکل می‌رسند هم‌شبکه نیستند */
-    function netsOf(l) { var e = (C.ep && C.ep[l.id]) || endpoints(l); if (!e) return []; return ['p' + Math.round(e.a.x) + ',' + Math.round(e.a.y), 'p' + Math.round(e.b.x) + ',' + Math.round(e.b.y)]; }
+    function netsOf(l) { var e = (C.ep && C.ep[l.id]) || endpoints(l); if (!e) return []; return ['o' + Math.round(e.a.x) + ',' + Math.round(e.a.y), 'i' + Math.round(e.b.x) + ',' + Math.round(e.b.y)]; } /* جهت‌دار: خطِ ورودی و خروجی هم‌شبکه نیستند */
     function routeLink(l, quick, obs, used, fine) {
       var e = (!quick && C.ep && C.ep[l.id]) || endpoints(l); if (!e) return null;
       var pts = null;
@@ -361,7 +378,8 @@
       if (!pts) pts = quickRoute(e.a, e.b);
       return { pts: pts, d: toPath(pts), mid: midOf(pts) };
     }
-    function obstacles() { return C.items.map(function (it) { return { l: it.x - 14, t: it.y - 14, r: it.x + it.w + 14, b: it.y + it.h + 14 }; }); }
+    /* حریمِ هر بلوک = طولِ خطِ صافِ خروج − ۲: هیچ خطِ دیگری وارد نمی‌شود؛ کنارِ بلوک فقط سرِ صافِ پورت‌های خودش است */
+    function obstacles() { var M = (o.stub || 46) - 2; return C.items.map(function (it) { return { l: it.x - M, t: it.y - M, r: it.x + it.w + M, b: it.y + it.h + M }; }); }
     function drawLink(l, g) {
       var geo = C.geo[l.id]; if (!geo) return;
       var el = linkEl[l.id];
@@ -374,7 +392,7 @@
       var v = el.childNodes[0], hit = el.childNodes[1];
       v.setAttribute('d', geo.d); hit.setAttribute('d', geo.d);
       v.setAttribute('stroke', l.color || '#7d88a3'); v.setAttribute('stroke-width', l.w || 2);
-      if (l.dashed) v.setAttribute('stroke-dasharray', '6 5'); else v.removeAttribute('stroke-dasharray');
+      if (l.dashed || geo.stale) v.setAttribute('stroke-dasharray', '6 5'); else v.removeAttribute('stroke-dasharray'); /* خط‌چین = هنوز چیده نشده */
       if (l.arrow !== false) v.setAttribute('marker-end', markerFor(l.color)); else v.removeAttribute('marker-end');
       if (l.both) v.setAttribute('marker-start', markerFor(l.color)); else v.removeAttribute('marker-start');
       el.setAttribute('class', 'cvl' + (C.selLink === l.id ? ' sel' : '') + (l.locked ? ' locked' : ''));
@@ -399,15 +417,50 @@
         var e = h('i', 'cv-eh'); e.setAttribute('data-lid', l.id); e.setAttribute('data-end', z[0]); e.style.left = z[1].x + 'px'; e.style.top = z[1].y + 'px'; e.title = 'بکشید و روی نقطهٔ دیگری رها کنید'; handleLayer.appendChild(e);
       });
     }
+    /* نمایش (پیش‌فرض): هیچ مسیریابی‌ای نیست. مسیرِ ذخیره‌شده عیناً کشیده می‌شود؛ خطی که مسیرِ ذخیره‌شدهٔ معتبر ندارد
+       (بلوکش جابه‌جا شده یا تازه است) با مسیرِ سادهٔ فوری و بی‌برچسب کشیده و «نامرتب» شمرده می‌شود.
+       مسیریابیِ سخت‌گیر فقط درونِ C.arrange() (دکمهٔ «چیدمان خودکار») اجرا می‌شود. */
     function drawAllLinks(quick, only) {
+      if (C.arranging) return strictLinks(quick, only);
+      var SV = (o.saved && o.saved()) || {}, EP = {}, ends = [], stale = 0;
+      C.links.forEach(function (l) {
+        var e = endpoints(l); if (!e) return; EP[l.id] = e; e.a.stub = e.b.stub = o.stub || 46;
+        ends.push({ it: e.from, p: e.a, o: e.b, dir: 'out', fixed: !!(l.fromPort || l.fa) }, { it: e.to, p: e.b, o: e.a, dir: 'in', fixed: !!(l.toPort || l.ta) });
+      });
+      spreadAnchors(ends);
+      C.ep = EP; C.geo = {};
+      C.links.forEach(function (l) {
+        var e = EP[l.id]; if (!e) return;
+        var sv = SV[l.id], pts = null;
+        if (sv && sv.p && sv.p.length > 1) {
+          var a = sv.p[0], b = sv.p[sv.p.length - 1];
+          if (Math.abs(a[0] - e.a.x) < 2 && Math.abs(a[1] - e.a.y) < 2 && Math.abs(b[0] - e.b.x) < 2 && Math.abs(b[1] - e.b.y) < 2) pts = sv.p.map(function (q) { return { x: q[0], y: q[1] }; });
+        }
+        if (pts) C.geo[l.id] = { pts: pts, d: toPath(pts), mid: sv.m ? { x: sv.m[0], y: sv.m[1] } : midOf(pts), hideLbl: !!sv.h };
+        else { stale++; var q = quickRoute(e.a, e.b); C.geo[l.id] = { pts: q, d: toPath(q), mid: midOf(q), hideLbl: true, stale: true }; }
+      });
+      C.stale = stale; if (o.onStale) o.onStale(stale);
+      C.links.forEach(function (l) { drawLink(l); });
+      placeHandles();
+    }
+    /* «چیدمان خودکار»: مسیریابیِ کامل و سخت‌گیر (+ باز کردنِ نما اگر لازم شد) و برگرداندنِ نتیجه برای ذخیره */
+    C.arrange = function () {
+      C.arranging = true; C._spread = 0;
+      try { drawAllLinks(false); } finally { C.arranging = false; }
+      var r2 = function (v) { return Math.round(v * 2) / 2; }, out = {};
+      C.links.forEach(function (l) { var g = C.geo[l.id]; if (!g) return; out[l.id] = { p: g.pts.map(function (q) { return [r2(q.x), r2(q.y)]; }), m: g.mid ? [r2(g.mid.x), r2(g.mid.y)] : null, h: g.hideLbl ? 1 : 0 }; });
+      C.stale = 0;
+      return { links: out, items: C.items.map(function (it) { return { id: it.id, x: it.x, y: it.y }; }) };
+    };
+    function strictLinks(quick, only) {
       if (C.items.length > 160) quick = true;
       var obs = quick ? null : obstacles(), used = [];
       /* خط‌های کوتاه‌تر اول: مسیرِ مستقیم مالِ آن‌هاست و خط‌های بلند دورشان می‌گردند */
       var order = C.links.slice(), len = {}, EP = {}, ends = [];
       order.forEach(function (l) {
-        var e = endpoints(l); if (!e) return; EP[l.id] = e; e.a.stub = e.b.stub = o.stub || 32; /* خطِ صافِ اول از هر پورت */
+        var e = endpoints(l); if (!e) return; EP[l.id] = e; e.a.stub = e.b.stub = o.stub || 46; e.a.lanes = o.lanes || 12; /* خطِ صافِ اول از هر پورت؛ شمارِ راهرو در هر فاصله */
         len[l.id] = Math.abs(e.a.x - e.b.x) + Math.abs(e.a.y - e.b.y);
-        ends.push({ it: e.from, p: e.a, o: e.b, fixed: !!(l.fromPort || l.fa) }, { it: e.to, p: e.b, o: e.a, fixed: !!(l.toPort || l.ta) });
+        ends.push({ it: e.from, p: e.a, o: e.b, dir: 'out', fixed: !!(l.fromPort || l.fa) }, { it: e.to, p: e.b, o: e.a, dir: 'in', fixed: !!(l.toPort || l.ta) });
       });
       if (!quick) spreadAnchors(ends);
       C.ep = EP;
@@ -415,12 +468,13 @@
       /* سرِ کوتاهِ هر خط کنارِ پورتش از پیش رزرو می‌شود تا هیچ خطِ دیگری از رویش رد نشود.
          اگر خطی راهِ بی‌هم‌پوشانی پیدا نکرد، دوباره چیده می‌شود و این بار آن خط اول می‌رود (تا ۴ دور؛ بهترین دور می‌ماند) */
       var best = null, fs0 = {};
-      for (var pass = 0; pass < (quick || only ? 1 : 4); pass++) {
+      var canSpread = !quick && !only && (C._spread || 0) < 6;
+      for (var pass = 0; pass < (quick || only ? 1 : canSpread ? 2 : 4); pass++) { /* تا جا برای باز کردن هست: ۲ دورِ سریع؛ بعد جست‌وجوی کامل */
         used = []; var geo = {}, failed = [];
         if (!quick) order.forEach(function (l) { var e = EP[l.id]; if (e) reserveStubs(e.a, e.b, used, netsOf(l)); });
         order.forEach(function (l) {
-          if (only && !only[l.from] && !only[l.to]) { if (C.geo[l.id]) { geo[l.id] = C.geo[l.id]; if (!quick) recordRoute(C.geo[l.id].pts, used, o.stub || 32, o.stub || 32, netsOf(l)); } return; }
-          var g = routeLink(l, quick, obs, used, pass > 0 && fs0[l.id]); if (g) { geo[l.id] = g; if (g.pts.soft) failed.push(l); if (!quick) { var ee = EP[l.id]; recordRoute(g.pts, used, ee ? ee.a.stub : 20, ee ? ee.b.stub : 20, netsOf(l)); } }
+          if (only && !only[l.from] && !only[l.to]) { if (C.geo[l.id]) { geo[l.id] = C.geo[l.id]; if (!quick) recordRoute(C.geo[l.id].pts, used, o.stub || 46, o.stub || 46, netsOf(l)); } return; }
+          var g = routeLink(l, quick, obs, used, !canSpread && pass > 0 && fs0[l.id]); if (g) { geo[l.id] = g; if (g.pts.soft) failed.push(l); if (!quick) { var ee = EP[l.id]; recordRoute(g.pts, used, ee ? ee.a.stub : 20, ee ? ee.b.stub : 20, netsOf(l)); } }
         });
         if (!best || failed.length < best.failed.length) best = { geo: geo, failed: failed };
         if (!failed.length) break;
@@ -428,6 +482,13 @@
         order = failed.concat(order.filter(function (l) { return !fs[l.id]; }));
       }
       C.geo = best.geo;
+      /* اجباری: اگر خطی راهِ مجاز نیافت، نما از مرکز باز می‌شود (×۱٫۲، تا ۶ بار) تا همه راه داشته باشند */
+      if (canSpread && best.failed.length) {
+        C._spread = (C._spread || 0) + 1;
+        var cx = 0, cy = 0; C.items.forEach(function (it) { cx += it.x + it.w / 2; cy += it.y + it.h / 2; }); cx /= C.items.length; cy /= C.items.length;
+        C.items.forEach(function (it) { it.x = Math.round(cx + (it.x + it.w / 2 - cx) * 1.2 - it.w / 2); it.y = Math.round(cy + (it.y + it.h / 2 - cy) * 1.2 - it.h / 2); if (itemEl[it.id]) placeItem(it, itemEl[it.id]); });
+        return drawAllLinks(false);
+      }
       if (!quick) {
         var rects = C.items.map(function (it) { return { l: it.x, t: it.y, r: it.x + it.w, b: it.y + it.h }; });
         var pos = placeLabels(order.filter(function (l) { return C.geo[l.id]; }).map(function (l) { return { id: l.id, pts: C.geo[l.id].pts, text: l.label || '' }; }), rects);
@@ -438,7 +499,7 @@
     }
 
     C.setData = function (items, links, keepSel) {
-      C.items = items; C.links = links; C.geo = {};
+      C.items = items; C.links = links; C.geo = {}; C._spread = 0;
       itemLayer.innerHTML = ''; linkLayer.innerHTML = ''; labelLayer.innerHTML = ''; itemEl = {}; linkEl = {}; labelEl = {};
       if (!keepSel) { C.sel = {}; C.selLink = null; }
       items.forEach(function (it) { var el = buildItem(it); placeItem(it, el); itemLayer.appendChild(el); itemEl[it.id] = el; if (C.sel[it.id]) el.classList.add('sel'); });

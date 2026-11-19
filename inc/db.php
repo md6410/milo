@@ -30,7 +30,7 @@ function pm_db(): PDO
 function pm_schema(PDO $db): void
 {
     $v = (int)$db->query('PRAGMA user_version')->fetchColumn();
-    if ($v >= 6) return;
+    if ($v >= 7) return;
     if ($v < 1) $db->exec("
     CREATE TABLE IF NOT EXISTS users(
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
@@ -114,6 +114,13 @@ function pm_schema(PDO $db): void
         CREATE INDEX IF NOT EXISTS tests_s ON tests(project_id, status);
         CREATE INDEX IF NOT EXISTS tests_r ON tests(node_id, ref);");
         $db->exec('PRAGMA user_version=6');
+    }
+    if ($v < 7) {
+        // v7: مسیرِ ذخیره‌شدهٔ خطوطِ هر سطحِ نقشه (node_id=0 = سطحِ اصلی)؛ فقط «چیدمان خودکار» آن را می‌سازد و باز کردنِ صفحه هیچ محاسبه‌ای نمی‌کند
+        $db->exec("CREATE TABLE IF NOT EXISTS routes(
+          project_id INTEGER NOT NULL, node_id INTEGER NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL,
+          PRIMARY KEY(project_id, node_id))");
+        $db->exec('PRAGMA user_version=7');
     }
 }
 

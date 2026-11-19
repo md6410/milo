@@ -76,6 +76,7 @@ function loadProjects() { return api('projects').then(function (j) { S.projects 
 function loadProject(pid) {
   return api('project_get', { project_id: pid }).then(function (P) {
     S.pid = pid; S.P = P; reindex();
+    S.routes = {}; (P.routes || []).forEach(function (r) { try { S.routes[String(r.node_id)] = JSON.parse(r.data); } catch (e) { } });
     if (S.focus && !S.idx.byId.has(S.focus)) S.focus = 0;
     if (S.sel && !S.idx.byId.has(S.sel)) S.sel = 0;
   });
@@ -416,13 +417,13 @@ function autoLayout(kids, edges, dims) {
   }
   /* فاصلهٔ ستون‌ها به اندازهٔ شمارِ خط‌هایی که از آن می‌گذرند (هر خط راهروی خودش) */
   var gapN = {}; edges.forEach(function (e) { if (layer[e.a] == null || layer[e.b] == null) return; var lo = Math.min(layer[e.a], layer[e.b]), hi = Math.max(layer[e.a], layer[e.b]); for (var c = lo; c < Math.max(hi, lo + 1); c++) gapN[c] = (gapN[c] || 0) + 1; });
-  var pos = {}, GY = 60, xoff = 0;
+  var pos = {}, GY = 2 * 46 + 30, xoff = 0;
   var colH = {}; ks.forEach(function (c) { colH[c] = cols[c].reduce(function (s2, k) { return s2 + dims[k].h; }, 0) + (cols[c].length - 1) * GY; });
   var H = Math.max.apply(null, ks.map(function (c) { return colH[c]; }).concat([0]));
   ks.forEach(function (c) {
     /* ستون‌های کناری نیم‌ردیفِ پورت (۱۱) جابه‌جا: پورت‌های روبه‌رو هیچ‌وقت هم‌تراز نیستند و خطِ صافِ خروجِ یکی جلوی دیگری را نمی‌گیرد */
     var list = cols[c], w = Math.max.apply(null, list.map(function (k) { return dims[k].w; })), y = (H - colH[c]) / 2 + (c % 2 ? 11 : 0);
-    xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += 150 + 14 * Math.min(gapN[c] || 0, 24);
+    xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += 2 * 46 + 40 + 16 * Math.min(gapN[c] || 0, 30); /* دو حریمِ بلوک + راهرو برای هر خط */
   });
   return pos;
 }
@@ -468,7 +469,7 @@ function mapModel(forceAuto) {
   for (var oi = 1; oi < LS.length; oi++) {
     for (var again = true, g2 = 0; again && g2 < 100; g2++) {
       again = false;
-      for (var oj = 0; oj < oi; oj++) { var A = LS[oj], B = LS[oi]; if (A.x < B.x + B.w + 40 && B.x < A.x + A.w + 40 && A.y < B.y + B.h + 40 && B.y < A.y + A.h + 40) { B.y = A.y + A.h + 40; again = true; } }
+      for (var oj = 0; oj < oi; oj++) { var A = LS[oj], B = LS[oi]; if (A.x < B.x + B.w + 110 && B.x < A.x + A.w + 110 && A.y < B.y + B.h + 110 && B.y < A.y + A.h + 110) { B.y = A.y + A.h + 110; again = true; } }
     }
   }
   var gi = 0, go = 0;
@@ -506,7 +507,8 @@ function mapModel(forceAuto) {
       if (S.editing) items.push({ id: 'badd:' + side, x: x, y: y0 + list.length * (RH + RG), w: 250, h: 54, shape: 'card', cls: 'rail rail-add', color: '#64748b', text: '', fixed: true, noColor: true, noEdit: true, noDelete: true, act: function () { portDialog(focus, side === 'in' ? 'inputs' : 'outputs'); },
         html: '<div class="rl-add">＋ ' + (side === 'in' ? 'ورودیِ تازه برای این ' : 'خروجیِ تازه برای این ') + E.KIND[F.kind] + '</div>' });
     };
-    mk('in', F.inputs || [], ex1 + 190); mk('out', F.outputs || [], ex0 - 190 - 250);
+    var railGap = 2 * 46 + 60 + 16 * Math.min(S.P.deps.filter(function (d) { return d.bnd && (d.from_id === focus || d.to_id === focus); }).length, 30); /* ریل‌ها به اندازهٔ خط‌هایشان دورتر */
+    mk('in', F.inputs || [], ex1 + railGap); mk('out', F.outputs || [], ex0 - railGap - 250);
     S.P.deps.forEach(function (d) {
       if (d.bnd === 'in' && d.from_id === focus && idx.byId.has(d.to_id) && idx.parentOf(d.to_id) === focus && items.some(function (i) { return i.id === 'bi:' + d.out_name; }))
         railLinks.push({ id: 'd' + d.id, from: 'bi:' + d.out_name, to: String(d.to_id), fromPort: d.out_name, toPort: d.in_name || null, label: d.label || '', color: '#1f9d63', dep: d, noFlip: true });
@@ -522,6 +524,9 @@ function mapModel(forceAuto) {
     }
     return { id: 'a' + k, from: e.a, to: e.b, label: e.labels.join('، '), color: col, dashed: true, locked: true, both: e.both };
   });
+  /* جایگاهِ ریل‌ها و بلوک‌های بیرونی همان است که «چیدمان خودکار» ذخیره کرده (تا مسیرهای ذخیره‌شده دقیقاً جور باشند) */
+  var RS = !forceAuto && S.routes && S.routes[String(focus || 0)];
+  if (RS && RS.fixed) items.forEach(function (it) { var f = RS.fixed[it.id]; if (f && (it.rail || it.ghost)) { it.x = f[0]; it.y = f[1]; } });
   return { items: items, links: links.concat(railLinks), kids: kids };
 }
 
@@ -537,7 +542,7 @@ function mapView() {
   var ck = childKinds(focus);
   var tools = '<div class="mtools"><span class="mt-lbl">ابزارها:</span>' + ['area', 'section', 'module', 'task'].map(function (k) { return toolBtn(k, E.KIND[k], KIND_ICON[k], ck.indexOf(k) >= 0, S.tool === k); }).join('') +
     toolBtn('lib', 'از کتابخانه', '📚', ck.indexOf('module') >= 0, S.tool === 'lib') +
-    '<span class="grow"></span>' + (focus && node && node.kind !== 'task' && ((node.inputs || []).length || (node.outputs || []).length) ? '<button class="btn sm" data-act="wirenames"' + (S.editing ? '' : ' disabled') + ' title="هر ورودی/خروجیِ ماژول به زیرمجموعه‌ای که ورودی/خروجیِ هم‌نام دارد وصل شود">🔗 وصلِ خودکارِ هم‌نام‌ها</button>' : '') + '<button class="btn sm" data-act="maplayout"' + (S.editing ? '' : ' disabled') + ' title="چیدمانِ خودکار بر پایهٔ وابستگی">✨ چیدمان خودکار</button><button class="btn sm" data-act="mapzoom" data-v="out">－</button><button class="btn sm" data-act="mapzoom" data-v="fit">جا بده</button><button class="btn sm" data-act="mapzoom" data-v="in">＋</button>' +
+    '<span class="grow"></span>' + (focus && node && node.kind !== 'task' && ((node.inputs || []).length || (node.outputs || []).length) ? '<button class="btn sm" data-act="wirenames"' + (S.editing ? '' : ' disabled') + ' title="هر ورودی/خروجیِ ماژول به زیرمجموعه‌ای که ورودی/خروجیِ هم‌نام دارد وصل شود">🔗 وصلِ خودکارِ هم‌نام‌ها</button>' : '') + '<span id="stalehint" class="pill" style="background:transparent;color:#b45309"></span><button class="btn sm" data-act="maplayout"' + (S.editing ? '' : ' disabled') + ' title="چیدن، مسیریابی و بررسیِ همهٔ قاعده‌ها — فقط یک بار؛ نتیجه ذخیره می‌شود و باز کردنِ صفحه دیگر هیچ محاسبه‌ای ندارد">✨ چیدمان خودکار</button><button class="btn sm" data-act="mapzoom" data-v="out">－</button><button class="btn sm" data-act="mapzoom" data-v="fit">جا بده</button><button class="btn sm" data-act="mapzoom" data-v="in">＋</button>' +
     (focus ? '<button class="btn sm" data-act="pick" data-id="' + focus + '">📝 جزئیاتِ این بخش</button>' : '') + '</div>';
   var rule = '<div class="rule">' + (node ? KIND_ICON[node.kind] + ' ' + E.KIND[node.kind] + ': ' : '🏠 سطحِ اصلی: ') + (ck.length ? 'اینجا می‌توانید بسازید ← ' + ck.map(function (k) { return KIND_ICON[k] + ' ' + E.KIND[k]; }).join('، ') : 'هیچ زیرمجموعه‌ای مجاز نیست') +
     (S.editing ? '' : ' <span class="pill s st-hold">حالتِ مشاهده — برای تغییر «✎ ویرایش» را بزنید</span>') + '</div>';
@@ -560,6 +565,8 @@ function mountMap() {
   var host = $('#cvhost'); if (!host) return;
   var key = String(S.focus), m = mapModel(), fresh = !S.cvView[key];
   var cv = S.cv = PMCanvas.create(host, { id: 'map', view: S.cvView[key], readonly: !S.editing,
+    saved: function () { var R = S.routes && S.routes[key]; return R ? R.links : null; },
+    onStale: function (n) { var h = $('#stalehint'); if (h) h.innerHTML = n ? '⚠ ' + FA(n) + ' خط هنوز چیده نشده (خط‌چین) — ' + (S.editing ? '«✨ چیدمان خودکار» را بزنید' : 'برای چیدن «✎ ویرایش» و سپس «✨ چیدمان خودکار»') : ''; },
     onView: function (v) { S.cvView[key] = v; },
     onPortClick: function (it, side, name) { if (it.rail) return portDialog2(S.focus, it.rail.side, it.rail.name); if (String(it.id).indexOf('badd:') === 0) return; portDialog2(rawId(it.id), side, name); },
     onSelect: function (it, lk) {
@@ -1590,9 +1597,24 @@ var ACTS = {
   mapadd: function (el) { return createBlock(S.cv ? S.cv.centerOf() : { x: 0, y: 0 }, el.getAttribute('data-kind')); },
   mapzoom: function (el) { var v = el.getAttribute('data-v'); if (!S.cv) return; if (v === 'fit') S.cv.fit(); else S.cv.zoomBy(v === 'in' ? 1.25 : 0.8); },
   maplayout: function () {
-    var m = mapModel(true), items = m.items.filter(function (i) { return !i.ghost; }).map(function (i) { return { id: +i.id, x: Math.round(i.x), y: Math.round(i.y) }; });
-    if (!items.length) return; delete S.cvView[String(S.focus)];
-    return api('nodes_bulk', { project_id: S.pid, items: items }).then(function () { toast('چیدمان انجام شد'); return reload(); });
+    /* تنها جایی که محاسبه می‌شود: چیدن ← مسیریابیِ سخت‌گیر ← ذخیرهٔ جایگاه‌ها و مسیرها. باز کردنِ بعدیِ صفحه فقط همین را می‌کشد. */
+    if (!S.cv || !needEdit()) return;
+    var key = String(S.focus || 0);
+    toast('در حالِ چیدن و بررسی… (فقط همین یک بار)');
+    return new Promise(function (res) { setTimeout(res, 60); }).then(function () {
+      var m = mapModel(true); if (!m.kids.length) return;
+      S.cv.setData(m.items, m.links, true);
+      var r = S.cv.arrange();
+      var isNode = function (id) { return /^\d+$/.test(String(id)); };
+      var items = r.items.filter(function (i) { return isNode(i.id); }).map(function (i) { return { id: +i.id, x: Math.round(i.x), y: Math.round(i.y) }; });
+      var fixed = {}; r.items.forEach(function (i) { if (!isNode(i.id)) fixed[i.id] = [Math.round(i.x), Math.round(i.y)]; });
+      /* مسیرها با جایگاه‌های گردشده ذخیره می‌شوند؛ گرد کردن (حداکثر نیم پیکسل) جورشدنِ سرِ خط‌ها را به هم نمی‌زند */
+      var data = { v: 1, links: r.links, fixed: fixed };
+      S.routes[key] = data; delete S.cvView[key];
+      return api('nodes_bulk', { project_id: S.pid, items: items }).then(function () {
+        return api('routes_save', { project_id: S.pid, node_id: S.focus || 0, data: JSON.stringify(data) });
+      }).then(function () { toast('چیده و ذخیره شد؛ از این به بعد بی‌هیچ محاسبه باز می‌شود'); return reload(); });
+    });
   },
   flowedit: function (el, ev, forId) {
     var id = forId || elId(el), n = S.idx.byId.get(id); if (!n) return;
@@ -1770,5 +1792,9 @@ document.addEventListener('mouseover', function (e) {
   }
 });
 window.addEventListener('hashchange', route);
-loadMe().then(function () { route(); setTimeout(updTick, 3000); setInterval(updTick, 10 * 60 * 1000); }).catch(function (e) { $('#app').innerHTML = '<div class="boot">خطا در اتصال به سرور: ' + esc(e.message) + '</div>'; });
+loadMe().then(function () {
+  /* اندازهٔ بلوک‌ها از روی قلم است؛ پیش از نخستین رسم منتظرِ قلم می‌مانیم (حداکثر ۱٫۵ ثانیه) تا با اندازه‌های لحظهٔ چیدن یکی باشد */
+  var fr = document.fonts && document.fonts.ready ? Promise.race([document.fonts.ready, new Promise(function (r) { setTimeout(r, 1500); })]) : Promise.resolve();
+  return fr.then(function () { route(); setTimeout(updTick, 3000); setInterval(updTick, 10 * 60 * 1000); });
+}).catch(function (e) { $('#app').innerHTML = '<div class="boot">خطا در اتصال به سرور: ' + esc(e.message) + '</div>'; });
 })();
