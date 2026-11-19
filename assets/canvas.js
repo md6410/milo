@@ -327,7 +327,7 @@
       if (editor) { tb.style.display = 'none'; return; }
       var pos = null;
       if (ids.length === 1 && !C.selLink) {
-        var it = byId(ids[0]); if (!it || it.ghost) { tb.style.display = 'none'; return; }
+        var it = byId(ids[0]); if (!it || it.ghost || it.rail || it.act) { tb.style.display = 'none'; return; }
         if (C.ro) { if (o.readActions) o.readActions(it).forEach(function (a) { tb.appendChild(btn(a.icon, a.title, function () { a.fn(it); })); }); }
         else {
           if (!it.noColor && o.onColor) tb.appendChild(colorDots(it.color, function (c) { o.onColor(it, c); }));
@@ -348,8 +348,8 @@
         if (!l || !geo || l.locked) { tb.style.display = 'none'; return; }
         if (o.onLinkColor) tb.appendChild(colorDots(l.color, function (c) { o.onLinkColor(l, c); }));
         tb.appendChild(btn('✎', 'برچسب', function () { C.editLabel(l.id); }));
-        if (o.onLinkBoth) tb.appendChild(btn(l.both ? '→' : '⇄', l.both ? 'یک‌طرفه کن' : 'دوطرفه کن', function () { o.onLinkBoth(l); }));
-        if (o.onLinkReverse && !l.both) tb.appendChild(btn('↺', 'برعکس‌کردنِ جهت', function () { o.onLinkReverse(l); }));
+        if (o.onLinkBoth && !l.noFlip) tb.appendChild(btn(l.both ? '→' : '⇄', l.both ? 'یک‌طرفه کن' : 'دوطرفه کن', function () { o.onLinkBoth(l); }));
+        if (o.onLinkReverse && !l.both && !l.noFlip) tb.appendChild(btn('↺', 'برعکس‌کردنِ جهت', function () { o.onLinkReverse(l); }));
         tb.appendChild(btn('🗑', 'حذفِ پیوند', function () { if (o.onLinkDelete) o.onLinkDelete(l); }));
         pos = toScreen(geo.mid.x, geo.mid.y);
       }

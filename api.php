@@ -374,12 +374,16 @@ try {
             $f = (int)$in['from_id']; $t = (int)$in['to_id'];
             $fn = $ownNode($f); $tn = $ownNode($t);
             if ($f === $t) fail('یک بخش به خودش وابسته نمی‌شود');
-            if (pm_is_related($db, $pid, $f, $t)) fail('بین یک بخش و زیرمجموعه‌اش وابستگی معنا ندارد');
+            $bnd = in_array($in['bnd'] ?? '', ['in', 'out'], true) ? $in['bnd'] : null;
+            if ($bnd) {   // پیوندِ مرزی: ورودی/خروجیِ ماژول ↔ زیرمجموعهٔ مستقیمش
+                $par = $bnd === 'in' ? $fn : $tn; $chd = $bnd === 'in' ? $tn : $fn;
+                if ((int)($chd['parent_id'] ?? 0) !== (int)$par['id']) fail('پیوندِ مرزی فقط بین یک بخش و زیرمجموعهٔ مستقیمش ممکن است');
+            } elseif (pm_is_related($db, $pid, $f, $t)) fail('بین یک بخش و زیرمجموعه‌اش وابستگی معنا ندارد');
             $outN = pm_str($in['out_name'] ?? '', 200) ?: null;
             $inN = pm_str($in['in_name'] ?? '', 200) ?: null;
             $two = !empty($in['two']) ? 1 : 0;
-            $st = $db->prepare('SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=? AND COALESCE(out_name,\'\')=? AND COALESCE(in_name,\'\')=?');
-            $st->execute([$pid, $f, $t, $outN ?? '', $inN ?? '']);
+            $st = $db->prepare('SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=? AND COALESCE(out_name,\'\')=? AND COALESCE(in_name,\'\')=? AND COALESCE(bnd,\'\')=?');
+            $st->execute([$pid, $f, $t, $outN ?? '', $inN ?? '', $bnd ?? '']);
             $eid = $st->fetchColumn();
             $label = pm_str($in['label'] ?? '', 300);
             if ($eid) {
@@ -389,8 +393,8 @@ try {
                     $db->prepare('UPDATE deps SET label=?, two=? WHERE id=?')->execute([$label, $two, $eid]);
                 } else $db->prepare('UPDATE deps SET label=? WHERE id=?')->execute([$label, $eid]);
             } else {
-                if (!$two && pm_dep_path($db, $pid, $t, $f)) fail('این وابستگی دور می‌سازد (به‌هم‌وابستگیِ چرخه‌ای)');
-                $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two) VALUES(?,?,?,?,?,?,?)')->execute([$pid, $f, $t, $label, $outN, $inN, $two]);
+                if (!$two && !$bnd && pm_dep_path($db, $pid, $t, $f)) fail('این وابستگی دور می‌سازد (به‌هم‌وابستگیِ چرخه‌ای)');
+                $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two,bnd) VALUES(?,?,?,?,?,?,?,?)')->execute([$pid, $f, $t, $label, $outN, $inN, $two, $bnd]);
                 pm_chg($db, $pid, $t, 'ساخت پیوند', $fn['title'] . ($outN ? ' (' . $outN . ')' : '') . ' ← ' . $tn['title'] . ($inN ? ' (' . $inN . ')' : ''), $author);
             }
             $touch();

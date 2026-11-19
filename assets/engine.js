@@ -65,7 +65,7 @@
     var preds = new Map(), succs = new Map();
     leaves.forEach(function (l) { preds.set(l, new Set()); succs.set(l, new Set()); });
     P.deps.forEach(function (d) {
-      if (!idx.byId.has(d.from_id) || !idx.byId.has(d.to_id) || d.two) return; /* پیوندِ دوطرفه ترتیب نمی‌سازد */
+      if (!idx.byId.has(d.from_id) || !idx.byId.has(d.to_id) || d.two || d.bnd) return; /* دوطرفه و مرزی ترتیب نمی‌سازند */
       idx.leavesOf(d.to_id).forEach(function (t) {
         idx.leavesOf(d.from_id).forEach(function (f) { if (f !== t) { preds.get(t).add(f); succs.get(f).add(t); } });
       });
@@ -137,7 +137,8 @@
 
   /* ---------- هدفِ ورودی/خروجی‌ها ---------- */
   /* هر ورودی/خروجی باید یا در فلوچارتِ همان بخش پردازش/منشأ داشته باشد، یا صریحاً «بدون استفاده» (با دلیل) علامت بخورد. */
-  function portStatus(n) {
+  function portStatus(n, deps) {
+    deps = deps || [];
     var out = [], f = n.flow && n.flow.nodes ? n.flow : null;
     [['in', n.inputs], ['out', n.outputs]].forEach(function (pair) {
       var side = pair[0];
@@ -146,7 +147,10 @@
         if (p.unused) st = { state: 'unused' };
         else {
           var bound = f ? f.nodes.filter(function (b) { return b.port && b.port.side === side && b.port.name === p.name; }) : [];
-          if (!bound.length) st = { state: 'none' };
+          /* ورودی/خروجیِ ماژول که به یک زیرمجموعه وصل شده، همان هدفش است */
+          var wired = deps.some(function (d) { return d.bnd === 'in' && side === 'in' && d.from_id === n.id && d.out_name === p.name || d.bnd === 'out' && side === 'out' && d.to_id === n.id && d.in_name === p.name; });
+          if (wired) st = { state: 'wired' };
+          else if (!bound.length) st = { state: 'none' };
           else st = { state: bound.some(function (b) { return (f.edges || []).some(function (e) { return side === 'in' ? e.from === b.id : e.to === b.id; }); }) ? 'ok' : 'dangling' };
         }
         st.side = side; st.name = p.name; st.port = p; out.push(st);
@@ -154,11 +158,11 @@
     });
     return out;
   }
-  var PORT_MSG = { ok: '✓ در فلوچارت تعریف شده', unused: '✗ بدون استفاده', none: '⚠ هدف مشخص نیست — در فلوچارت نیامده و «بدون استفاده» هم علامت نخورده', dangling: '⚠ در فلوچارت هست ولی به چیزی وصل نیست' };
+  var PORT_MSG = { wired: '✓ به زیرمجموعه وصل شده', ok: '✓ در فلوچارت تعریف شده', unused: '✗ بدون استفاده', none: '⚠ هدف مشخص نیست — در فلوچارت نیامده و «بدون استفاده» هم علامت نخورده', dangling: '⚠ در فلوچارت هست ولی به چیزی وصل نیست' };
   function portIssues(idx) {
     var out = [];
     idx.preorder.forEach(function (id) {
-      var n = idx.byId.get(id), bad = portStatus(n).filter(function (s) { return s.state === 'none' || s.state === 'dangling'; });
+      var n = idx.byId.get(id), bad = portStatus(n, idx.P.deps).filter(function (s) { return s.state === 'none' || s.state === 'dangling'; });
       if (bad.length) out.push({ id: id, title: n.title, path: idx.pathText(id), ports: bad });
     });
     return out;
@@ -203,7 +207,7 @@
       project: { id: p.id, name: p.name, description: p.description, start_date: p.start_date, target_date: p.target_date, status: p.status, ai_brief: p.ai_brief },
       build_order: bo,
       nodes: P.nodes.map(function (n) { return nodeOut(idx, n); }),
-      dependencies: P.deps.map(function (d) { return { from: d.from_id, to: d.to_id, label: d.label, out: d.out_name || null, 'in': d.in_name || null, two: !!d.two }; }),
+      dependencies: P.deps.map(function (d) { return { from: d.from_id, to: d.to_id, label: d.label, out: d.out_name || null, 'in': d.in_name || null, two: !!d.two, bnd: d.bnd || null }; }),
       milestones: P.milestones.map(function (m) { return { id: m.id, title: m.title, date: m.date, done: !!m.done, note: m.note }; }),
       logs: P.logs.slice().reverse().map(function (l) { return { id: l.id, node: l.node_id, kind: l.kind, body: l.body, author: l.author, date: l.created_at }; }),
       files: P.files.map(function (f) { return { id: f.id, node: f.node_id, name: f.name, size: f.size }; }),

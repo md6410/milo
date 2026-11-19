@@ -131,8 +131,9 @@ function pm_import(PDO $db, array $doc, string $mode, ?int $pid, string $author)
             if (!$f || !$t || $f === $t) { $stat['warnings'][] = "وابستگیِ نامعتبر: $fk → $tk"; continue; }
             $outN = pm_str($d['out'] ?? ($d['out_name'] ?? ''), 200) ?: null;
             $inN = pm_str($d['in'] ?? ($d['in_name'] ?? ''), 200) ?: null;
-            $q = $db->prepare("SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=? AND COALESCE(out_name,'')=? AND COALESCE(in_name,'')=?");
-            $q->execute([$pid, $f, $t, $outN ?? '', $inN ?? '']);
+            $bnd = in_array($d['bnd'] ?? '', ['in', 'out'], true) ? $d['bnd'] : null;
+            $q = $db->prepare("SELECT id FROM deps WHERE project_id=? AND from_id=? AND to_id=? AND COALESCE(out_name,'')=? AND COALESCE(in_name,'')=? AND COALESCE(bnd,'')=?");
+            $q->execute([$pid, $f, $t, $outN ?? '', $inN ?? '', $bnd ?? '']);
             $eid = $q->fetchColumn();
             if (!empty($d['deleted'])) {
                 if ($eid) $db->prepare('DELETE FROM deps WHERE id=?')->execute([$eid]);
@@ -142,12 +143,12 @@ function pm_import(PDO $db, array $doc, string $mode, ?int $pid, string $author)
                 if (array_key_exists('label', $d)) $db->prepare('UPDATE deps SET label=? WHERE id=?')->execute([pm_str($d['label'], 300), $eid]);
                 continue;
             }
-            if (pm_is_related($db, $pid, $f, $t) || (empty($d['two']) && pm_dep_path($db, $pid, $t, $f))) {
+            if ((!$bnd && pm_is_related($db, $pid, $f, $t)) || (!$bnd && empty($d['two']) && pm_dep_path($db, $pid, $t, $f))) {
                 $stat['warnings'][] = "وابستگیِ «$fk → $tk» دور یا رابطهٔ والد/فرزند می‌ساخت؛ رد شد";
                 continue;
             }
-            $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two) VALUES(?,?,?,?,?,?,?)')
-               ->execute([$pid, $f, $t, pm_str($d['label'] ?? '', 300), $outN, $inN, !empty($d['two']) ? 1 : 0]);
+            $db->prepare('INSERT INTO deps(project_id,from_id,to_id,label,out_name,in_name,two,bnd) VALUES(?,?,?,?,?,?,?,?)')
+               ->execute([$pid, $f, $t, pm_str($d['label'] ?? '', 300), $outN, $inN, !empty($d['two']) ? 1 : 0, $bnd]);
             $stat['deps']++;
         }
 

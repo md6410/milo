@@ -329,3 +329,26 @@ table.t th{top:90px}
 .bk-t{-webkit-line-clamp:2}
 .tt,.t{cursor:default}
 .io .btn.ghost{padding:0 6px}
+
+/* ریل‌های ورودی/خروجی: نقشه و فلوچارت */
+.cvi.rail{background:var(--card);border:2px solid var(--ic);border-radius:14px;border-top-width:2px}
+.cvi.rail-in{border-inline-end-width:7px}.cvi.rail-out{border-inline-start-width:7px}
+.cvi.rail-add{border-style:dashed;background:transparent;opacity:.8;border-width:1.5px}
+.rl{padding:7px 12px;height:100%;overflow:hidden}.rl-h{font-size:11px;color:var(--mut)}.rl-n{font-weight:700;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rl-s{font-size:11px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rl.st-ok .rl-s,.rl.st-wired .rl-s{color:var(--ok)}.rl.st-none .rl-s,.rl.st-dangling .rl-s{color:var(--warn)}.rl.st-unused{opacity:.65}
+.rl-add{display:flex;align-items:center;justify-content:center;height:100%;font-size:13px;color:var(--mut)}
+.ps.wired{background:color-mix(in srgb,var(--ok) 10%,var(--card));border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.aw{display:flex;gap:6px;align-items:center;padding:4px 6px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;cursor:pointer}.aw input{width:auto}
+.fl-rails.cv-ui{position:absolute;inset:0;pointer-events:none}
+.fl-rails .fl-rail{position:absolute;top:10px;bottom:10px;width:200px;overflow-y:auto;pointer-events:none;display:flex;flex-direction:column;gap:7px;padding:2px}
+.fl-rails .fl-rail.in{right:10px}.fl-rails .fl-rail.out{left:10px}
+.fl-rails .fl-rail>*{pointer-events:auto}
+.fl-rh{font-size:11.5px;font-weight:700;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:3px 8px;text-align:center;line-height:1.5}.fl-rh span{font-weight:400;color:var(--mut);font-size:10.5px}
+.fl-rn{font-size:11px;color:var(--mut);text-align:center}
+.fl-pc{position:relative;background:var(--card);border:2px solid var(--line);border-radius:11px;padding:5px 26px 5px 8px;cursor:grab;box-shadow:var(--shadow);font-size:12.5px;line-height:1.45}
+.fl-pc.in{border-inline-start:6px solid #1f9d63}.fl-pc.out{border-inline-end:6px solid #e0912b}
+.fl-pc:hover{border-color:var(--pri)}
+.fl-pc .pcn{font-weight:600;word-break:break-word}.fl-pc .pcs{font-size:10.5px}.fl-pc .pcv{display:block;color:var(--mut);font-size:10.5px;word-break:break-word}
+.fl-pc.ok .pcs,.fl-pc.wired .pcs{color:var(--ok)}.fl-pc.none .pcs,.fl-pc.dangling .pcs{color:var(--warn)}.fl-pc.unused{opacity:.7}.fl-pc.unused .pcn{text-decoration:line-through}
+.fl-pc .fl-px{position:absolute;top:4px;inset-inline-end:4px}

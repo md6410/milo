@@ -97,7 +97,7 @@
       '<button class="btn sm" data-a="zout">－</button><button class="btn sm" data-a="fit">جا بده</button><button class="btn sm" data-a="zin">＋</button>' +
       '<button class="btn sm" data-a="svg">⬇ تصویر SVG</button><button class="btn sm" data-a="mmd">کپی Mermaid</button>' +
       (RO ? '' : '<button class="btn sm pri" data-a="save">ذخیره</button><button class="btn sm" data-a="saveclose">ذخیره و بستن</button>') + '<button class="btn sm" data-a="close">✕ بستن</button></div>' +
-      '<div class="fl-body">' + (RO ? '' : '<div class="fl-pal">' + pal + '<div class="fl-ports"></div><div class="fl-hint">دوبار کلیک روی بوم = شکلِ تازه<br>از نقطهٔ کنارِ هر شکل بکشید و روی شکلِ دیگر رها کنید = اتصال<br>رها کردن روی جای خالی = شکل + اتصال<br>روی شکل/پیکان کلیک کنید تا رنگ و ابزار بیاید<br>Shift+کشیدن = انتخابِ چندتایی</div></div>') + '<div class="fl-cv"></div></div>';
+      '<div class="fl-body">' + (RO ? '' : '<div class="fl-pal">' + pal + '<div class="fl-hint">دوبار کلیک روی بوم = شکلِ تازه<br>از نقطهٔ کنارِ هر شکل بکشید و روی شکلِ دیگر رها کنید = اتصال<br>رها کردن روی جای خالی = شکل + اتصال<br>روی شکل/پیکان کلیک کنید تا رنگ و ابزار بیاید<br>Shift+کشیدن = انتخابِ چندتایی</div></div>') + '<div class="fl-cv"></div></div>';
     document.body.appendChild(ov);
     var host = ov.querySelector('.fl-cv');
 
@@ -108,23 +108,28 @@
       var b = boundNode(side, p.name); if (!b) return 'none';
       return data.edges.some(function (e) { return side === 'in' ? e.from === b.id : e.to === b.id; }) ? 'ok' : 'dangling';
     }
-    var ST_TXT = { ok: '✓ تعریف شده', unused: '✗ بدون استفاده', none: '⚠ هدف مشخص نیست', dangling: '⚠ به چیزی وصل نیست' };
+    var ST_TXT = { wired: '✓ به ماژول وصل است', ok: '✓ تعریف شده', unused: '✗ بدون استفاده', none: '⚠ هدف مشخص نیست', dangling: '⚠ به چیزی وصل نیست' };
+    var railsEl = null;
     function renderPorts() {
-      var box = ov.querySelector('.fl-ports'); if (!box) return;
-      var html = '';
+      if (!railsEl) { railsEl = document.createElement('div'); railsEl.className = 'cv-ui fl-rails'; host.appendChild(railsEl); }
+      var cols = { 'in': '', out: '' };
       ['in', 'out'].forEach(function (side) {
         ports[side].forEach(function (p) {
-          var st = portState(side, p);
-          html += '<div class="fl-pr ' + st + '"><button type="button" class="fl-pchip ' + side + '" data-port="' + side + ':' + esc(p.name) + '" title="' + (side === 'in' ? 'ورودی' : 'خروجی') + ' — ' + ST_TXT[st] + (p.why ? ': ' + esc(p.why) : '') + '">' + (side === 'in' ? '⇢' : '⇠') + ' ' + esc(p.name) + '</button><span class="fl-pst">' + ST_TXT[st] + '</span>' +
-            '<button type="button" class="fl-px' + (p.unused ? ' on' : '') + '" data-px="' + side + ':' + esc(p.name) + '" title="' + (p.unused ? 'از حالتِ «بدون استفاده» درآور' : 'این ' + (side === 'in' ? 'ورودی' : 'خروجی') + ' در اینجا استفاده نمی‌شود') + '">✗</button></div>';
+          var st = portState(side, p), tip = [p.name, p.desc, p.use, p.via, ST_TXT[st], p.why].filter(Boolean).join(' — ');
+          cols[side] += '<div class="fl-pc ' + st + ' ' + side + '"' + (RO ? '' : ' draggable="true"') + ' data-port="' + side + ':' + esc(p.name) + '" title="' + esc(tip) + (RO ? '' : ' — بکشید و روی بوم رها کنید، یا کلیک کنید') + '">' +
+            '<div class="pcn">' + (side === 'in' ? '⇢ ' : '⇠ ') + esc(p.name) + '</div><div class="pcs">' + ST_TXT[st] + '</div>' + (p.via ? '<small class="pcv">↳ ' + esc(p.via) + '</small>' : '') +
+            (RO ? '' : '<button type="button" class="fl-px' + (p.unused ? ' on' : '') + '" data-px="' + side + ':' + esc(p.name) + '" title="' + (p.unused ? 'از حالتِ «بدون استفاده» درآور' : 'این ' + (side === 'in' ? 'ورودی' : 'خروجی') + ' در اینجا استفاده نمی‌شود') + '">✗</button>') + '</div>';
         });
       });
-      box.innerHTML = html ? '<div class="fl-ph">ورودی/خروجی‌های این بخش<br><span>هرکدام باید اینجا پردازش/منشأ داشته باشد یا ✗ بخورد</span></div>' + html : '<div class="fl-ph">این بخش ورودی/خروجی ندارد</div>';
+      railsEl.innerHTML = '<div class="fl-rail in"><div class="fl-rh">⇢ ورودی‌های این بخش<br><span>به بوم بکشید</span></div>' + (cols['in'] || '<div class="fl-rn">ورودی ندارد</div>') + '</div>' +
+        '<div class="fl-rail out"><div class="fl-rh">⇠ خروجی‌های این بخش<br><span>به بوم بکشید</span></div>' + (cols.out || '<div class="fl-rn">خروجی ندارد</div>') + '</div>';
     }
-    function addPortNode(side, name) {
+    function addPortNode(side, name, at) {
       var ex = boundNode(side, name);
       if (ex) { cv.select([ex.id]); cv.focusItem(ex.id); return; }
-      var c = cv.centerOf(), t = TYPES.io, n = { id: uid(data.nodes, 'n'), type: 'io', text: name, x: Math.round((c.x - t.w / 2 + (side === 'in' ? -230 : 230)) / 10) * 10, y: Math.round((c.y - 120 + data.nodes.filter(function (q) { return q.port && q.port.side === side; }).length * 100) / 10) * 10, w: t.w, h: t.h, color: null, port: { side: side, name: name } };
+      var t = TYPES.io, cnt2 = data.nodes.filter(function (q) { return q.port && q.port.side === side; }).length, r = host.getBoundingClientRect(), p;
+      if (at) p = at; else p = cv.toWorld(side === 'in' ? r.right - 330 : r.left + 330, r.top + 120 + cnt2 * 95);
+      var n = { id: uid(data.nodes, 'n'), type: 'io', text: name, x: Math.round((p.x - t.w / 2) / 10) * 10, y: Math.round((p.y - t.h / 2) / 10) * 10, w: t.w, h: t.h, color: null, port: { side: side, name: name } };
       data.nodes.push(n); commit(); render(false); cv.select([n.id]);
     }
     function toggleUnused(side, name) {
@@ -231,8 +236,8 @@
     ov.addEventListener('click', function (e) {
       var b = e.target.closest('[data-a]'), p = e.target.closest('.fl-p');
       var pc = e.target.closest('[data-port]'), px = e.target.closest('[data-px]');
-      if (pc) { var pv = pc.getAttribute('data-port').split(':'); addPortNode(pv[0], pv.slice(1).join(':')); return; }
       if (px) { var xv = px.getAttribute('data-px').split(':'); toggleUnused(xv[0], xv.slice(1).join(':')); return; }
+      if (pc && !RO) { var pv = pc.getAttribute('data-port').split(':'); addPortNode(pv[0], pv.slice(1).join(':')); return; }
       if (p) { var c = cv.centerOf(); var jitter = (cnt++ % 6) * 24; addNode(p.getAttribute('data-t'), c.x + jitter, c.y + jitter, true); return; }
       if (!b) return;
       var a = b.getAttribute('data-a');
@@ -252,10 +257,12 @@
       }
     });
     /* کشیدن از نوار به بوم */
-    ov.addEventListener('dragstart', function (e) { var p = e.target.closest ? e.target.closest('.fl-p') : null; if (p) { e.dataTransfer.setData('text/plain', p.getAttribute('data-t')); e.dataTransfer.effectAllowed = 'copy'; } });
+    ov.addEventListener('dragstart', function (e) { var pcx = e.target.closest ? e.target.closest('.fl-pc') : null; if (pcx && !RO) { e.dataTransfer.setData('text/plain', 'port:' + pcx.getAttribute('data-port')); e.dataTransfer.effectAllowed = 'copy'; return; } var p = e.target.closest ? e.target.closest('.fl-p') : null; if (p) { e.dataTransfer.setData('text/plain', p.getAttribute('data-t')); e.dataTransfer.effectAllowed = 'copy'; } });
     host.addEventListener('dragover', function (e) { e.preventDefault(); });
     host.addEventListener('drop', function (e) {
-      e.preventDefault(); var t = e.dataTransfer.getData('text/plain'); if (!TYPES[t]) return;
+      e.preventDefault(); var t = e.dataTransfer.getData('text/plain');
+      if (t.indexOf('port:') === 0) { var pv2 = t.slice(5).split(':'), rr = host.getBoundingClientRect(); addPortNode(pv2[0], pv2.slice(1).join(':'), cv.toWorld(e.clientX, e.clientY)); return; }
+      if (!TYPES[t]) return;
       var r = host.getBoundingClientRect(), v = cv.getView();
       addNode(t, (e.clientX - r.left - v.x) / v.k, (e.clientY - r.top - v.y) / v.k, true);
     });
