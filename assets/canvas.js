@@ -28,6 +28,16 @@
     if (Math.abs(dx) * it.h >= Math.abs(dy) * it.w) return dx >= 0 ? { x: it.x + it.w, y: cy, nx: 1, ny: 0 } : { x: it.x, y: cy, nx: -1, ny: 0 };
     return dy >= 0 ? { x: cx, y: it.y + it.h, nx: 0, ny: 1 } : { x: cx, y: it.y, nx: 0, ny: -1 };
   }
+  function anchorAt(it, a) { /* a = {s:'t'|'r'|'b'|'l', t:0..1} نقطه‌ای دلخواه روی لبهٔ شکل */
+    var f = a && a.t != null ? Math.max(0, Math.min(1, a.t)) : 0.5;
+    switch (a && a.s) {
+      case 'r': return { x: it.x + it.w, y: it.y + it.h * f, nx: 1, ny: 0 };
+      case 'l': return { x: it.x, y: it.y + it.h * f, nx: -1, ny: 0 };
+      case 't': return { x: it.x + it.w * f, y: it.y, nx: 0, ny: -1 };
+      default: return { x: it.x + it.w * f, y: it.y + it.h, nx: 0, ny: 1 };
+    }
+  }
+  function parseAnchor(s) { if (!s) return null; var p = String(s).split(':'); return { s: p[0], t: p[1] == null ? 0.5 : parseFloat(p[1]) }; }
   function portAnchor(it, side, name) { /* side: 'in' = لبهٔ راست، 'out' = لبهٔ چپ */
     var list = it.ports && it.ports[side] || [];
     for (var i = 0; i < list.length; i++) if (list[i].name === name) return side === 'in' ? { x: it.x + it.w, y: it.y + list[i].y, nx: 1, ny: 0 } : { x: it.x, y: it.y + list[i].y, nx: -1, ny: 0 };
@@ -117,7 +127,8 @@
     var o = [p[0]];
     for (var i = 1; i < p.length - 1; i++) {
       var a = o[o.length - 1], b = p[i], c = p[i + 1];
-      if ((a.x === b.x && b.x === c.x) || (a.y === b.y && b.y === c.y)) continue;
+      /* فقط وقتی نقطهٔ میانی حذف شود که مسیر همان جهت را ادامه دهد (برگشت به عقب حذف نشود) */
+      if ((a.x === b.x && b.x === c.x && (b.y - a.y) * (c.y - b.y) > 0) || (a.y === b.y && b.y === c.y && (b.x - a.x) * (c.x - b.x) > 0)) continue;
       o.push(b);
     }
     o.push(p[p.length - 1]);
@@ -172,7 +183,7 @@
     o = o || {};
     var C = { items: [], links: [], view: o.view || { x: 40, y: 40, k: 1 }, sel: {}, selLink: null, snap: o.snap !== false ? 10 : 0, ro: !!o.readonly, armed: null, geo: {} };
     var itemEl = {}, linkEl = {}, labelEl = {};
-    host.classList.add('cv'); host.innerHTML = '';
+    host.classList.add('cv'); if (o.freePoints) host.classList.add('free'); host.innerHTML = '';
     host.setAttribute('tabindex', '0');
     var world = h('div', 'cv-world');
     var svg = sv('svg', { 'class': 'cv-svg', width: 1, height: 1 });
@@ -182,7 +193,8 @@
     var linkLayer = sv('g', {}), tmpLayer = sv('g', {});
     svg.appendChild(linkLayer); svg.appendChild(tmpLayer);
     var itemLayer = h('div', 'cv-items'), labelLayer = h('div', 'cv-labels');
-    world.appendChild(svg); world.appendChild(itemLayer); world.appendChild(labelLayer);
+    var handleLayer = h('div', 'cv-handles');
+    world.appendChild(svg); world.appendChild(itemLayer); world.appendChild(labelLayer); world.appendChild(handleLayer);
     var ui = h('div', 'cv-ui');
     host.appendChild(world); host.appendChild(ui);
     var tb = h('div', 'cv-tb'); tb.style.display = 'none'; ui.appendChild(tb);
@@ -222,7 +234,13 @@
         inner += '<svg class="cvsh" viewBox="0 0 ' + it.w + ' ' + it.h + '" preserveAspectRatio="none"><path d="' + shapePath(shape, it.w, it.h) + '" vector-effect="non-scaling-stroke"/></svg>';
         inner += '<div class="cvt">' + (it.html != null ? it.html : esc(it.text || '')) + '</div>';
       } else inner += it.html || '';
-      if (!it.ghost && !C.ro) inner += '<i class="cvp p-t" data-p="t"></i><i class="cvp p-r" data-p="r"></i><i class="cvp p-b" data-p="b"></i><i class="cvp p-l" data-p="l"></i>';
+      if (!it.ghost && !C.ro) {
+        var ts = o.freePoints && shape !== 'diamond' ? [0.25, 0.5, 0.75] : [0.5];
+        ['t', 'r', 'b', 'l'].forEach(function (sd) { ts.forEach(function (f) {
+          var lx = sd === 'r' ? 100 : sd === 'l' ? 0 : f * 100, ly = sd === 't' ? 0 : sd === 'b' ? 100 : f * 100;
+          inner += '<i class="cvp" data-p="' + sd + ':' + f + '" style="left:' + lx + '%;top:' + ly + '%"></i>';
+        }); });
+      }
       if (it.ports) ['in', 'out'].forEach(function (side) {
         (it.ports[side] || []).forEach(function (p) {
           inner += '<i class="cvpt ' + side + (p.unused ? ' unused' : '') + (p.warn ? ' warn' : '') + '" data-pt="' + side + '" data-name="' + esc(p.name) + '" style="top:' + p.y + 'px" title="' + (side === 'in' ? 'ورودی: ' : 'خروجی: ') + esc(p.name) + (p.tip ? ' — ' + esc(p.tip) : '') + ' (کلیک = جزئیات)"></i>';
@@ -235,7 +253,7 @@
 
     function endpoints(l) {
       var a = byId(l.from), b = byId(l.to); if (!a || !b) return null;
-      var pa = l.fromPort ? portAnchor(a, 'out', l.fromPort) : null, pb = l.toPort ? portAnchor(b, 'in', l.toPort) : null;
+      var pa = l.fromPort ? portAnchor(a, 'out', l.fromPort) : (l.fa ? anchorAt(a, l.fa) : null), pb = l.toPort ? portAnchor(b, 'in', l.toPort) : (l.ta ? anchorAt(b, l.ta) : null);
       var ca = { x: b.x + b.w / 2, y: b.y + b.h / 2 }, cb = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
       if (!pa) pa = anchor(a, pb ? pb.x : ca.x, pb ? pb.y : ca.y);
       if (!pb) pb = anchor(b, pa.x, pa.y);
@@ -283,6 +301,14 @@
       } else if (lb) { lb.remove(); delete labelEl[l.id]; }
     }
     /* quick=true: فقط مسیرِ سریع (هنگام کشیدن)؛ only: فقط پیوندهای متصل به این آیتم‌ها */
+    function placeHandles() {
+      handleLayer.innerHTML = '';
+      var l = C.selLink && linkById(C.selLink), g = l && C.geo[l.id];
+      if (!l || !g || l.locked || C.ro || !o.onLinkReattach) return;
+      [['from', g.pts[0]], ['to', g.pts[g.pts.length - 1]]].forEach(function (z) {
+        var e = h('i', 'cv-eh'); e.setAttribute('data-lid', l.id); e.setAttribute('data-end', z[0]); e.style.left = z[1].x + 'px'; e.style.top = z[1].y + 'px'; e.title = 'بکشید و روی نقطهٔ دیگری رها کنید'; handleLayer.appendChild(e);
+      });
+    }
     function drawAllLinks(quick, only) {
       var obs = quick ? null : obstacles(), used = [];
       if (C.items.length > 90) quick = true;
@@ -291,6 +317,7 @@
         var g = routeLink(l, quick, obs, used); if (g) { C.geo[l.id] = g; if (!quick) recordUsed(g.pts, used); }
       });
       C.links.forEach(function (l) { drawLink(l); });
+      placeHandles();
     }
 
     C.setData = function (items, links, keepSel) {
@@ -308,7 +335,7 @@
       C.sel = {}; (ids || []).forEach(function (i) { C.sel[i] = 1; }); C.selLink = linkId || null;
       for (var id in itemEl) itemEl[id].classList.toggle('sel', !!C.sel[id]);
       for (var lid in linkEl) { linkEl[lid].setAttribute('class', 'cvl' + (C.selLink === lid ? ' sel' : '') + ((linkById(lid) || {}).locked ? ' locked' : '')); if (labelEl[lid]) labelEl[lid].classList.toggle('sel', C.selLink === lid); }
-      placeToolbar();
+      placeToolbar(); placeHandles();
       if (o.onSelect) o.onSelect(ids && ids.length === 1 ? byId(ids[0]) : null, linkId ? linkById(linkId) : null, ids || []);
     }
     C.select = setSel;
@@ -428,6 +455,8 @@
       if (e.button !== 0 || e.target.closest('.cv-ui')) return;
       if (editor) closeEditor(true);
       host.focus({ preventScroll: true });
+      var eh = e.target.closest ? e.target.closest('.cv-eh') : null;
+      if (eh && !C.ro) { host.setPointerCapture(e.pointerId); drag = { t: 'reattach', link: linkById(eh.getAttribute('data-lid')), end: eh.getAttribute('data-end'), sx: e.clientX, sy: e.clientY, moved: false }; return; }
       var port = e.target.closest ? e.target.closest('.cvp') : null;
       var pt = e.target.closest ? e.target.closest('.cvpt') : null;
       var it = targetItem(e);
@@ -435,7 +464,7 @@
       var lbl = e.target.closest ? e.target.closest('.cv-lbl') : null;
       host.setPointerCapture(e.pointerId);
       if (pt && it && C.ro) { drag = { t: 'portclick', from: it, fromSide: pt.getAttribute('data-pt'), fromName: pt.getAttribute('data-name'), sx: e.clientX, sy: e.clientY, moved: false }; return; }
-      if ((port || pt) && it && !C.ro) { drag = { t: 'link', from: it, fromSide: pt ? pt.getAttribute('data-pt') : null, fromName: pt ? pt.getAttribute('data-name') : null, sx: e.clientX, sy: e.clientY, moved: false }; return; }
+      if ((port || pt) && it && !C.ro) { drag = { t: 'link', fromAnchor: port ? parseAnchor(port.getAttribute('data-p')) : null, from: it, fromSide: pt ? pt.getAttribute('data-pt') : null, fromName: pt ? pt.getAttribute('data-name') : null, sx: e.clientX, sy: e.clientY, moved: false }; return; }
       if (it) {
         if (e.shiftKey) { var ids = C.selectedIds(); var i = ids.indexOf(it.id); if (i >= 0) ids.splice(i, 1); else ids.push(it.id); setSel(ids); }
         else if (!C.sel[it.id]) setSel([it.id]);
@@ -459,7 +488,7 @@
         drawAllLinks(true, mv); placeToolbar();
       } else if (drag.t === 'link') {
         drag.moved = true; var w = toWorld(e.clientX, e.clientY);
-        var a = drag.fromSide === 'out' ? portAnchor(drag.from, 'out', drag.fromName) : drag.fromSide === 'in' ? portAnchor(drag.from, 'in', drag.fromName) : anchor(drag.from, w.x, w.y);
+        var a = drag.fromSide === 'out' ? portAnchor(drag.from, 'out', drag.fromName) : drag.fromSide === 'in' ? portAnchor(drag.from, 'in', drag.fromName) : (drag.fromAnchor ? anchorAt(drag.from, drag.fromAnchor) : anchor(drag.from, w.x, w.y));
         a = a || anchor(drag.from, w.x, w.y);
         tmpLayer.innerHTML = '';
         var c = curve(a, { x: w.x, y: w.y }, a, { nx: -a.nx, ny: -a.ny });
@@ -467,6 +496,12 @@
         var under = document.elementFromPoint(e.clientX, e.clientY), tgt = under && under.closest ? under.closest('.cvi') : null;
         for (var i in itemEl) itemEl[i].classList.toggle('drop', !!tgt && tgt === itemEl[i] && i !== drag.from.id);
         $$pts(host, under);
+      } else if (drag.t === 'reattach') {
+        drag.moved = true; var w2 = toWorld(e.clientX, e.clientY), g = C.geo[drag.link.id], fixed = drag.end === 'from' ? g.pts[g.pts.length - 1] : g.pts[0];
+        tmpLayer.innerHTML = '';
+        tmpLayer.appendChild(sv('path', { d: 'M' + fixed.x + ' ' + fixed.y + ' L' + w2.x + ' ' + w2.y, fill: 'none', stroke: 'var(--pri)', 'stroke-width': 2.4, 'stroke-dasharray': '6 4' }));
+        var un2 = document.elementFromPoint(e.clientX, e.clientY), tg2 = un2 && un2.closest ? un2.closest('.cvi') : null;
+        for (var i2 in itemEl) itemEl[i2].classList.toggle('drop', !!tg2 && tg2 === itemEl[i2]);
       } else if (drag.t === 'box') {
         drag.moved = true; var r = host.getBoundingClientRect();
         if (!drag.el) { drag.el = h('div', 'cv-box'); ui.appendChild(drag.el); }
@@ -494,11 +529,16 @@
         var tpt = under && under.closest ? under.closest('.cvpt') : null;
         if (tgt && tgt.getAttribute('data-id') !== d.from.id) {
           var to = byId(tgt.getAttribute('data-id')), tSide = tpt ? tpt.getAttribute('data-pt') : null, tName = tpt ? tpt.getAttribute('data-name') : null;
-          var fromIt = d.from, fSide = d.fromSide, fName = d.fromName;
+          var fromIt = d.from, fSide = d.fromSide, fName = d.fromName, tdot = under.closest('.cvp'), ta = tdot ? parseAnchor(tdot.getAttribute('data-p')) : null, fa = d.fromAnchor || null;
           /* اگر از ورودی کشیده شد و روی خروجی رها شد، جهت برعکس می‌شود */
-          if (fSide === 'in' && tSide === 'out') { if (o.onConnect) o.onConnect(to, fromIt, tName, fName); }
-          else if (o.onConnect) o.onConnect(fromIt, to, fSide === 'out' ? fName : null, tSide === 'in' ? tName : null);
-        } else if (!tgt && o.onConnectNew) o.onConnectNew(d.from, toWorld(e.clientX, e.clientY), d.fromSide === 'out' ? d.fromName : null);
+          if (fSide === 'in' && tSide === 'out') { if (o.onConnect) o.onConnect(to, fromIt, tName, fName, ta, fa); }
+          else if (o.onConnect) o.onConnect(fromIt, to, fSide === 'out' ? fName : null, tSide === 'in' ? tName : null, fa, ta);
+        } else if (!tgt && o.onConnectNew) o.onConnectNew(d.from, toWorld(e.clientX, e.clientY), d.fromSide === 'out' ? d.fromName : null, d.fromAnchor || null);
+      } else if (d.t === 'reattach') {
+        tmpLayer.innerHTML = ''; for (var i3 in itemEl) itemEl[i3].classList.remove('drop');
+        if (!d.moved) return;
+        var un3 = document.elementFromPoint(e.clientX, e.clientY), tg3 = un3 && un3.closest ? un3.closest('.cvi') : null, dot3 = un3 && un3.closest ? un3.closest('.cvp') : null;
+        if (tg3 && o.onLinkReattach) o.onLinkReattach(d.link, d.end, byId(tg3.getAttribute('data-id')), dot3 ? parseAnchor(dot3.getAttribute('data-p')) : null);
       } else if (d.t === 'box') {
         if (d.el) { var br = d.el.getBoundingClientRect(); d.el.remove();
           var a = toWorld(br.left, br.top), b = toWorld(br.right, br.bottom), ids = [];
@@ -546,5 +586,5 @@
     return C;
   }
 
-  W.PMCanvas = { create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
+  W.PMCanvas = { anchorAt: anchorAt, create: create, PALETTE: PALETTE, shapePath: shapePath, anchor: anchor, curve: curve, esc: esc, route: routeOrtho, quickRoute: quickRoute, toPath: toPath, midOf: midOf };
 })(window);

@@ -218,7 +218,8 @@ function pm_flow_clean($f): ?array
         $id = substr(preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($e['id'] ?? '')), 0, 24) ?: ('e' . count($edges));
         if (isset($eids[$id])) $id .= count($edges);
         $eids[$id] = true;
-        $edges[] = ['id' => $id, 'from' => $a, 'to' => $b, 'label' => pm_str($e['label'] ?? '', 100), 'color' => pm_color($e['color'] ?? null)];
+        $an = function ($x) { return (is_array($x) && in_array($x['s'] ?? '', ['t', 'r', 'b', 'l'], true)) ? ['s' => $x['s'], 't' => round(max(0, min(1, (float)($x['t'] ?? 0.5))), 2)] : null; };
+        $edges[] = ['id' => $id, 'from' => $a, 'to' => $b, 'label' => pm_str($e['label'] ?? '', 100), 'color' => pm_color($e['color'] ?? null), 'fa' => $an($e['fa'] ?? null), 'ta' => $an($e['ta'] ?? null)];
     }
     return $nodes ? ['v' => 1, 'nodes' => $nodes, 'edges' => $edges] : null;
 }

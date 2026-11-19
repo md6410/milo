@@ -1346,9 +1346,9 @@ function updDialog(u) {
       $$('[data-up]', f).forEach(function (b) { b.addEventListener('click', guard(function () {
         b.disabled = true; var act = b.getAttribute('data-up');
         return api(act === 'apply' ? 'update_apply' : 'update_check', {}).then(function (j) {
-          S.updAvail = !!j.upd.available; close();
-          if (act === 'apply' && j.r.updated) { toast('نسخهٔ ' + j.r.version + ' نصب شد؛ صفحه تازه می‌شود…'); setTimeout(function () { location.reload(); }, 1500); }
-          else { toast(j.upd.available ? 'نسخهٔ تازه‌ای هست' : 'به‌روز هستید'); render(true); }
+          S.updAvail = !!j.upd.available;
+          if (act === 'apply' && j.r.updated) { close(); toast('نسخهٔ ' + j.r.version + ' نصب شد؛ صفحه تازه می‌شود…'); setTimeout(function () { location.reload(); }, 1500); }
+          else { toast(j.upd.available ? 'نسخهٔ تازه‌ای هست' : 'به‌روز هستید'); close(); updDialog(j.upd); refreshMenu(); }
         }).catch(function (e) { b.disabled = false; fail(e); });
       })); });
     },
@@ -1535,6 +1535,18 @@ document.addEventListener('paste', function (e) {
   imgs.forEach(function (f, i) { dt.items.add(new File([f], 'paste-' + Date.now() + '-' + i + '.png', { type: f.type })); });
   inp.files = dt.files; toast(FA(imgs.length) + ' تصویر به پیوست افزوده شد');
 });
+/* جهتِ متن خودکار: فارسی راست‌چین، انگلیسی چپ‌چین (علامتِ سؤال و نقطه سرِ جای درست می‌ماند) */
+var DIR_SEL = 'input:not([type]),input[type=text],input[type=search],textarea,.bk-t,.pre,.log .body,.tt,.t,.cv-lbl,.cvt,.rl-n,.pcn,.io-n,.bk-pi,.bk-po,.lbl-t';
+function setDir(e) { if (e.classList.contains('ltr')) return; var form = e.tagName === 'INPUT' || e.tagName === 'TEXTAREA'; e.setAttribute('dir', form && !e.value ? 'rtl' : 'auto'); }
+function autoDir(root) {
+  if (!root || root.nodeType !== 1) return;
+  var list = []; if (root.matches && root.matches(DIR_SEL)) list.push(root);
+  Array.prototype.push.apply(list, root.querySelectorAll(DIR_SEL));
+  list.forEach(function (e) { if (!e.getAttribute('data-dirset')) { e.setAttribute('data-dirset', '1'); setDir(e); } });
+}
+document.addEventListener('input', function (e) { var t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && t.getAttribute('data-dirset')) setDir(t); });
+if (window.MutationObserver) new MutationObserver(function (ms) { ms.forEach(function (m) { Array.prototype.forEach.call(m.addedNodes, autoDir); }); }).observe(document.body, { childList: true, subtree: true });
+autoDir(document.body);
 document.addEventListener('keydown', function (e) {
   var meta = e.ctrlKey || e.metaKey;
   if (e.key === 'Escape') $$('.mm.open').forEach(function (x) { x.classList.remove('open'); });

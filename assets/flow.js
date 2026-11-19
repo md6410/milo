@@ -47,7 +47,7 @@
     var obs = nodes.map(function (n) { return { l: n.x - 14, t: n.y - 14, r: n.x + n.w + 14, b: n.y + n.h + 14 }; }), used = [];
     (flow.edges || []).forEach(function (e) {
       var a = by[e.from], b = by[e.to]; if (!a || !b) return;
-      var pa = CV.anchor(a, b.x + b.w / 2, b.y + b.h / 2), pb = CV.anchor(b, a.x + a.w / 2, a.y + a.h / 2), col = e.color || '#7d88a3';
+      var pa = e.fa ? CV.anchorAt(a, e.fa) : CV.anchor(a, e.ta ? CV.anchorAt(b, e.ta).x : b.x + b.w / 2, e.ta ? CV.anchorAt(b, e.ta).y : b.y + b.h / 2), pb = e.ta ? CV.anchorAt(b, e.ta) : CV.anchor(b, pa.x, pa.y), col = e.color || '#7d88a3';
       var pts = (nodes.length < 90 && CV.route(pa, pb, obs, used)) || CV.quickRoute(pa, pb);
       var d = CV.toPath(pts), mid = CV.midOf(pts);
       for (var q = 1; q < pts.length; q++) { var u = pts[q - 1], w = pts[q]; if (u.y === w.y) used.push({ h: true, c: u.y, lo: Math.min(u.x, w.x), hi: Math.max(u.x, w.x) }); else if (u.x === w.x) used.push({ h: false, c: u.x, lo: Math.min(u.y, w.y), hi: Math.max(u.y, w.y) }); }
@@ -145,7 +145,7 @@
         if (n.port) { it.color = n.color || PORT_COL[n.port.side]; it.html = '<span class="pb ' + n.port.side + '">' + (n.port.side === 'in' ? '⇢ ورودی' : '⇠ خروجی') + '</span>' + esc(n.text); it.cls += ' fl-bound'; }
         return it;
       });
-      var links = data.edges.map(function (e) { return { id: e.id, from: e.from, to: e.to, label: e.label, color: e.color }; });
+      var links = data.edges.map(function (e) { return { id: e.id, from: e.from, to: e.to, label: e.label, color: e.color, fa: e.fa || null, ta: e.ta || null }; });
       return { items: items, links: links };
     }
     function render(keepSel) { renderPorts(); var m = model(); var sel = cv.selectedIds(); cv.setData(m.items, m.links, keepSel); if (keepSel) cv.select(sel.filter(function (i) { return data.nodes.some(function (n) { return n.id === i; }); })); empty(); }
@@ -172,11 +172,12 @@
       if (editNow) setTimeout(function () { cv.edit(n.id); }, 30);
       return n;
     }
-    function addEdge(a, b) {
+    function sameAnchor(x, y) { return JSON.stringify(x || null) === JSON.stringify(y || null); }
+    function addEdge(a, b, fa, ta) {
       if (a === b) return;
-      for (var i = 0; i < data.edges.length; i++) if (data.edges[i].from === a && data.edges[i].to === b) return;
+      for (var i = 0; i < data.edges.length; i++) if (data.edges[i].from === a && data.edges[i].to === b && sameAnchor(data.edges[i].fa, fa) && sameAnchor(data.edges[i].ta, ta)) return;
       var from = nodeById(a), outs = data.edges.filter(function (e) { return e.from === a; }).length;
-      var e = { id: uid(data.edges, 'e'), from: a, to: b, label: from && from.type === 'decision' ? (outs === 0 ? 'بله' : outs === 1 ? 'خیر' : '') : '', color: null };
+      var e = { id: uid(data.edges, 'e'), from: a, to: b, label: from && from.type === 'decision' ? (outs === 0 ? 'بله' : outs === 1 ? 'خیر' : '') : '', color: null, fa: fa || null, ta: ta || null };
       data.edges.push(e); commit(); render(true); return e;
     }
     function removeNodes(ids) {
@@ -186,13 +187,18 @@
       commit(); render(false);
     }
     var cnt = 0;
-    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO,
+    cv = CV.create(host, { id: 'fl', onView: null, readonly: RO, freePoints: true,
       onMove: function (list) { list.forEach(function (m) { var n = nodeById(m.id); if (n) { n.x = m.x; n.y = m.y; } }); commit(); },
       onAdd: function (p) { addNode('process', p.x, p.y, true); },
-      onConnect: function (a, b) { addEdge(a.id, b.id); },
-      onConnectNew: function (a, p) {
+      onConnect: function (a, b, pa, pb, fa, ta) { addEdge(a.id, b.id, fa, ta); },
+      onLinkReattach: function (l, end, item, anchorSpec) {
+        var e = data.edges.filter(function (x) { return x.id === l.id; })[0]; if (!e) return;
+        if (end === 'from') { if (item.id === e.to) return; e.from = item.id; e.fa = anchorSpec || null; } else { if (item.id === e.from) return; e.to = item.id; e.ta = anchorSpec || null; }
+        commit(); render(true); cv.select([], l.id);
+      },
+      onConnectNew: function (a, p, port, fa) {
         var src = nodeById(a.id), n = addNode(src && src.type === 'decision' ? 'process' : 'process', p.x, p.y, false);
-        var e = addEdge(a.id, n.id); cv.select([n.id]); setTimeout(function () { cv.edit(n.id); }, 30);
+        var e = addEdge(a.id, n.id, fa, null); cv.select([n.id]); setTimeout(function () { cv.edit(n.id); }, 30);
       },
       onRename: function (it, v) { var n = nodeById(it.id); if (n) { n.text = v; commit(); render(true); } },
       onColor: function (it, c) { var n = nodeById(it.id); if (n) { n.color = c; commit(); render(true); } },
