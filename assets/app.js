@@ -416,13 +416,13 @@ function autoLayout(kids, edges, dims) {
   }
   /* فاصلهٔ ستون‌ها به اندازهٔ شمارِ خط‌هایی که از آن می‌گذرند (هر خط راهروی خودش) */
   var gapN = {}; edges.forEach(function (e) { if (layer[e.a] == null || layer[e.b] == null) return; var lo = Math.min(layer[e.a], layer[e.b]), hi = Math.max(layer[e.a], layer[e.b]); for (var c = lo; c < Math.max(hi, lo + 1); c++) gapN[c] = (gapN[c] || 0) + 1; });
-  var pos = {}, GY = 60, xoff = 0;
+  var pos = {}, GY = 2 * 46 + 30, xoff = 0;
   var colH = {}; ks.forEach(function (c) { colH[c] = cols[c].reduce(function (s2, k) { return s2 + dims[k].h; }, 0) + (cols[c].length - 1) * GY; });
   var H = Math.max.apply(null, ks.map(function (c) { return colH[c]; }).concat([0]));
   ks.forEach(function (c) {
     /* ستون‌های کناری نیم‌ردیفِ پورت (۱۱) جابه‌جا: پورت‌های روبه‌رو هیچ‌وقت هم‌تراز نیستند و خطِ صافِ خروجِ یکی جلوی دیگری را نمی‌گیرد */
     var list = cols[c], w = Math.max.apply(null, list.map(function (k) { return dims[k].w; })), y = (H - colH[c]) / 2 + (c % 2 ? 11 : 0);
-    xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += 150 + 14 * Math.min(gapN[c] || 0, 24);
+    xoff += w; list.forEach(function (k) { pos[k] = { x: -xoff + (w - dims[k].w) / 2, y: y }; y += dims[k].h + GY; }); xoff += 2 * 46 + 40 + 16 * Math.min(gapN[c] || 0, 30); /* دو حریمِ بلوک + راهرو برای هر خط */
   });
   return pos;
 }
@@ -468,7 +468,7 @@ function mapModel(forceAuto) {
   for (var oi = 1; oi < LS.length; oi++) {
     for (var again = true, g2 = 0; again && g2 < 100; g2++) {
       again = false;
-      for (var oj = 0; oj < oi; oj++) { var A = LS[oj], B = LS[oi]; if (A.x < B.x + B.w + 40 && B.x < A.x + A.w + 40 && A.y < B.y + B.h + 40 && B.y < A.y + A.h + 40) { B.y = A.y + A.h + 40; again = true; } }
+      for (var oj = 0; oj < oi; oj++) { var A = LS[oj], B = LS[oi]; if (A.x < B.x + B.w + 110 && B.x < A.x + A.w + 110 && A.y < B.y + B.h + 110 && B.y < A.y + A.h + 110) { B.y = A.y + A.h + 110; again = true; } }
     }
   }
   var gi = 0, go = 0;
@@ -506,7 +506,8 @@ function mapModel(forceAuto) {
       if (S.editing) items.push({ id: 'badd:' + side, x: x, y: y0 + list.length * (RH + RG), w: 250, h: 54, shape: 'card', cls: 'rail rail-add', color: '#64748b', text: '', fixed: true, noColor: true, noEdit: true, noDelete: true, act: function () { portDialog(focus, side === 'in' ? 'inputs' : 'outputs'); },
         html: '<div class="rl-add">＋ ' + (side === 'in' ? 'ورودیِ تازه برای این ' : 'خروجیِ تازه برای این ') + E.KIND[F.kind] + '</div>' });
     };
-    mk('in', F.inputs || [], ex1 + 190); mk('out', F.outputs || [], ex0 - 190 - 250);
+    var railGap = 2 * 46 + 60 + 16 * Math.min(S.P.deps.filter(function (d) { return d.bnd && (d.from_id === focus || d.to_id === focus); }).length, 30); /* ریل‌ها به اندازهٔ خط‌هایشان دورتر */
+    mk('in', F.inputs || [], ex1 + railGap); mk('out', F.outputs || [], ex0 - railGap - 250);
     S.P.deps.forEach(function (d) {
       if (d.bnd === 'in' && d.from_id === focus && idx.byId.has(d.to_id) && idx.parentOf(d.to_id) === focus && items.some(function (i) { return i.id === 'bi:' + d.out_name; }))
         railLinks.push({ id: 'd' + d.id, from: 'bi:' + d.out_name, to: String(d.to_id), fromPort: d.out_name, toPort: d.in_name || null, label: d.label || '', color: '#1f9d63', dep: d, noFlip: true });
