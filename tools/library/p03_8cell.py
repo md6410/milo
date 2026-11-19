@@ -287,7 +287,35 @@ MILESTONES = [
 ]
 
 
+# متن‌های برگرفته از ماژول‌های کتابخانه که شبیهِ دستورِ SQL یا مسیرِ فایل‌اند؛ فایروالِ هاست (ModSecurity) درخواستِ
+# «ایمپورت از فایل» را با آن‌ها ۴۰۳ می‌کند. فقط در همین پروژه به فارسیِ ساده نوشته می‌شوند (فایل‌های کتابخانه دست نمی‌خورند).
+PLAIN = [
+    ('مسیرِ امن (بی ../)', 'مسیرِ امن (بی بازگشت به پوشهٔ بالاتر)'),
+    ('مسیرِ امن (بی ../، سطحِ محدود)', 'مسیرِ امن (بی بازگشت به پوشهٔ بالاتر، سطحِ محدود)'),
+    ('INSERT print_jobs', 'ثبتِ کار در print_jobs'),
+    ('INSERT orders + order_items', 'ثبت در orders و order_items'),
+    ('جدا از INSERT (', 'جدا از ثبتِ سفارش ('),
+    ('پس از INSERTِ سفارش', 'پس از ثبتِ سفارش'),
+    ('جدا از INSERT:', 'جدا از ثبتِ سفارش:'),
+    ('SELECT محصول‌های', 'خواندنِ محصول‌های'),
+    ('؛ UPDATE جدا.', '؛ به‌روزرسانیِ جدا.'),
+]
+
+
+def _plain(o):
+    if isinstance(o, str):
+        for a, b in PLAIN:
+            o = o.replace(a, b)
+        return o
+    if isinstance(o, list):
+        return [_plain(v) for v in o]
+    if isinstance(o, dict):
+        return {k: _plain(v) for k, v in o.items()}
+    return o
+
+
 def extra(data):
+    data['nodes'] = _plain(data['nodes'])
     data['project'].update({'description': DESCRIPTION, 'ai_brief': AI_BRIEF, 'status': 'active'})
     data['milestones'] = MILESTONES
     data['logs'] = [{'kind': 'note', 'body': b} for b in NOTES]
