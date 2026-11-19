@@ -74,3 +74,35 @@ def _put(node, tests, kind, fname):
             r = '%s~%d' % (o['ref'], k); k += 1
         o['ref'] = r; seen.add(r)
         node.tests.append(o)
+
+
+_cache = {}
+
+
+def attach_to_module(root):
+    """تست‌های واقعیِ Weby (و Invora) را روی خودِ ماژولِ کتابخانه می‌گذارد؛ برگرداندنِ شمار."""
+    from itests import tests as invora_tests
+    if 'all' not in _cache:
+        g = collections.defaultdict(list)
+        for fname, v in all_tests().items():
+            stem = fname[2:].rsplit('.', 1)[0]
+            g[topic(stem)].append((fname, stem, v))
+        _cache['all'] = g
+        _cache['inv'] = invora_tests()
+    n = 0
+    items = _cache['all'].get(root.title, [])
+    secs = {c.title: c for c in root.children if c.kind == 'section'} if root.title == SHIP else {}
+    for fname, stem, v in sorted(items):
+        kind = 'e2e' if fname.endswith('.py') else 'unit'
+        dst = root
+        if root.title == SHIP:
+            if stem.startswith('courier'): dst = secs.get('پیکِ فروشگاه', root)
+            elif re.match(r'(tipax|post|ebz)', stem): dst = secs.get('حاملِ برون‌سازمانی (تیپاکس و پست)', root)
+            else: dst = secs.get('میزِ ارسال', root)
+        _put(dst, v['tests'], kind, fname)
+        n += len(v['tests'])
+    for t in _cache['inv'].get(root.title, []):
+        root.add_test(t['title'], port=t.get('port', ''), state=t.get('state', ''), given=t['given'], expect=t['expect'], kind=t['kind'],
+                      expect_kind=t['expect_kind'], ref=t.get('ref', ''), source=t['source'])
+        n += 1
+    return n
