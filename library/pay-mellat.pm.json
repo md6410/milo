@@ -1,0 +1,1619 @@
+{
+ "schema": "weby-projectmanager/1",
+ "library_module": {
+  "slug": "pay-mellat",
+  "title": "درگاه بانک ملت (به‌پرداخت)",
+  "version": 1
+ },
+ "project": {
+  "name": "کتابخانهٔ ماژول‌ها"
+ },
+ "nodes": [
+  {
+   "id": "payme_1",
+   "parent": null,
+   "kind": "module",
+   "title": "درگاه بانک ملت (به‌پرداخت)",
+   "order": 1,
+   "summary": "درگاهِ ملت با SOAP: bpPayRequest ← RefId؛ فرمِ POST به startpay؛ bpVerifyRequest و bpSettleRequest.",
+   "details": "ملت SOAP است و بدونِ افزونهٔ SoapClient روی هاست کار نمی‌کند؛ این را پیش از هر چیز بسنج و پیامِ روشن بده. bpPayRequest با terminalId، userName، userPassword، orderId، amount (ریال)، localDate/localTime، callBackUrl؛ پاسخ «کد,RefId» (۰ = موفق). بازگشت: ResCode (۰ موفق)، SaleOrderId، SaleReferenceId. سپس verify و بعد settle (کد ۰ یا ۴۵ = تسویهٔ قبلاً انجام‌شده).",
+   "process": "",
+   "tech": "WSDL: https://bpm.shaparak.ir/pgwchannel/services/pgw?wsdl؛ startpay: https://bpm.shaparak.ir/pgwchannel/startpay.mellat؛ تنظیمات: mellat_terminal_id, mellat_username, mellat_password.",
+   "inputs": [
+    {
+     "name": "درخواستِ شروعِ درگاه",
+     "desc": "سفارش/فاکتور/اصلاح: id، code، total (تومان)، mobile",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "تنظیماتِ درگاه",
+     "desc": "کلیدها و حالتِ آزمایشی/واقعیِ همین درگاه (در جدولِ settings)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "بازگشتِ درگاه",
+     "desc": "پارامترهایی که بانک به نشانیِ بازگشت می‌فرستد",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "نشانیِ انتقال به درگاه",
+     "desc": "redirect یا فرمِ POST",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "نتیجهٔ تأیید",
+     "desc": "{ok, ref, error}",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "🔴",
+   "color": "#dc2626",
+   "est_days": 4,
+   "tags": "پرداخت، درگاه",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "sub",
+      "text": "شروعِ تراکنش",
+      "x": 330,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "sub",
+      "text": "بازگشت و تأیید",
+      "x": 630,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n3",
+      "type": "io",
+      "text": "درخواستِ شروعِ درگاه",
+      "x": 0,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "درخواستِ شروعِ درگاه"
+      }
+     },
+     {
+      "id": "n4",
+      "type": "io",
+      "text": "تنظیماتِ درگاه",
+      "x": 0,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "تنظیماتِ درگاه"
+      }
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "بازگشتِ درگاه",
+      "x": 0,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "بازگشتِ درگاه"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "io",
+      "text": "نشانیِ انتقال به درگاه",
+      "x": 930,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "نشانیِ انتقال به درگاه"
+      }
+     },
+     {
+      "id": "n7",
+      "type": "io",
+      "text": "نتیجهٔ تأیید",
+      "x": 930,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "نتیجهٔ تأیید"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n3",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n4",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n5",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n1",
+      "to": "n2",
+      "label": "شناسهٔ تراکنشِ ذخیره‌شده",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n1",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n2",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "payme_2",
+   "parent": "payme_1",
+   "kind": "section",
+   "title": "شروعِ تراکنش",
+   "order": 2,
+   "summary": "ساختنِ تراکنش در بانک و فرستادنِ مشتری",
+   "details": "",
+   "process": "",
+   "tech": "",
+   "inputs": [
+    {
+     "name": "درخواستِ شروعِ درگاه",
+     "desc": "سفارش/فاکتور/اصلاح: id، code، total (تومان)، mobile",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "تنظیماتِ درگاه",
+     "desc": "کلیدها و حالتِ آزمایشی/واقعیِ همین درگاه (در جدولِ settings)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "نشانیِ انتقال به درگاه",
+     "desc": "redirect یا فرمِ POST",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "شناسهٔ تراکنشِ ذخیره‌شده",
+     "desc": "authority/توکن/providerId که هنگامِ شروع ذخیره شد",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "🚀",
+   "color": null,
+   "est_days": null,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "process",
+      "text": "درخواستِ پرداخت (SOAP)",
+      "x": 330,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "process",
+      "text": "فرمِ POST به startpay",
+      "x": 630,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n3",
+      "type": "io",
+      "text": "درخواستِ شروعِ درگاه",
+      "x": 0,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "درخواستِ شروعِ درگاه"
+      }
+     },
+     {
+      "id": "n4",
+      "type": "io",
+      "text": "تنظیماتِ درگاه",
+      "x": 0,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "تنظیماتِ درگاه"
+      }
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "نشانیِ انتقال به درگاه",
+      "x": 930,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "نشانیِ انتقال به درگاه"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "io",
+      "text": "شناسهٔ تراکنشِ ذخیره‌شده",
+      "x": 930,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "شناسهٔ تراکنشِ ذخیره‌شده"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n3",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n1",
+      "to": "n2",
+      "label": "RefId ملت",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n2",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n2",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "payme_3",
+   "parent": "payme_2",
+   "kind": "task",
+   "title": "درخواستِ پرداخت (SOAP)",
+   "order": 3,
+   "summary": "",
+   "details": "",
+   "process": "orderId عددی است (شناسهٔ سفارش) و مبلغ ریال؛ پاسخ رشتهٔ «کد,RefId» است.",
+   "tech": "gw_mellat_client() با connection_timeout=25، exceptions=true؛ gw_mellat_start.",
+   "inputs": [
+    {
+     "name": "درخواستِ شروعِ درگاه",
+     "desc": "سفارش/فاکتور/اصلاح: id، code، total (تومان)، mobile",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "RefId ملت",
+     "desc": "شناسهٔ مرجعِ بانک",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 1.5,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "درخواستِ شروعِ درگاه",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "درخواستِ شروعِ درگاه"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "decision",
+      "text": "کلاسِ SoapClient در PHP هست؟",
+      "x": 215,
+      "y": 210,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "خطا: «درگاه ملت نیاز به SOAP دارد»",
+      "x": 550,
+      "y": 230,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 340,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "bpPayRequest: terminalId، userName، userPassword، orderId، amount، localDate=Ymd، localTime=His، additionalData، callBackUrl، payerId=0",
+      "x": 220,
+      "y": 385,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "decision",
+      "text": "بخشِ اول پاسخ ۰ و RefId هست؟",
+      "x": 215,
+      "y": 500,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "process",
+      "text": "پیامِ «درگاه ملت خطای شمارهٔ X برگرداند»",
+      "x": 550,
+      "y": 520,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 630,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n10",
+      "type": "io",
+      "text": "RefId ملت",
+      "x": 220,
+      "y": 675,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "RefId ملت"
+      }
+     },
+     {
+      "id": "n11",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 780,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n3",
+      "to": "n6",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n7",
+      "to": "n8",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n8",
+      "to": "n9",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e9",
+      "from": "n7",
+      "to": "n10",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e10",
+      "from": "n10",
+      "to": "n11",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "payme_4",
+   "parent": "payme_2",
+   "kind": "task",
+   "title": "فرمِ POST به startpay",
+   "order": 4,
+   "summary": "",
+   "details": "",
+   "process": "مشتری با RefId به صفحهٔ بانک می‌رود.",
+   "tech": "{method:\"post\", url, fields:{RefId}}.",
+   "inputs": [
+    {
+     "name": "RefId ملت",
+     "desc": "شناسهٔ مرجعِ بانک",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "نشانیِ انتقال به درگاه",
+     "desc": "redirect یا فرمِ POST",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 0.5,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "RefId ملت",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "RefId ملت"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "db",
+      "text": "gw_save_authority(order, \"mellat\", RefId)",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 84,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "io",
+      "text": "فرمِ POST: RefId → startpay.mellat",
+      "x": 220,
+      "y": 330,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "نشانیِ انتقال به درگاه",
+      "x": 220,
+      "y": 445,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "نشانیِ انتقال به درگاه"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 550,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "payme_5",
+   "parent": "payme_1",
+   "kind": "section",
+   "title": "بازگشت و تأیید",
+   "order": 5,
+   "summary": "سنجشِ بازگشت و تأییدِ سرورِ بانک",
+   "details": "",
+   "process": "",
+   "tech": "",
+   "inputs": [
+    {
+     "name": "بازگشتِ درگاه",
+     "desc": "پارامترهایی که بانک به نشانیِ بازگشت می‌فرستد",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "شناسهٔ تراکنشِ ذخیره‌شده",
+     "desc": "authority/توکن/providerId که هنگامِ شروع ذخیره شد",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "تنظیماتِ درگاه",
+     "desc": "کلیدها و حالتِ آزمایشی/واقعیِ همین درگاه (در جدولِ settings)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "نتیجهٔ تأیید",
+     "desc": "{ok, ref, error}",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✅",
+   "color": null,
+   "est_days": null,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "process",
+      "text": "سنجشِ ResCode",
+      "x": 330,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "process",
+      "text": "verify و settle",
+      "x": 630,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n3",
+      "type": "io",
+      "text": "بازگشتِ درگاه",
+      "x": 0,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "بازگشتِ درگاه"
+      }
+     },
+     {
+      "id": "n4",
+      "type": "io",
+      "text": "شناسهٔ تراکنشِ ذخیره‌شده",
+      "x": 0,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "شناسهٔ تراکنشِ ذخیره‌شده"
+      }
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "تنظیماتِ درگاه",
+      "x": 0,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "تنظیماتِ درگاه"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "io",
+      "text": "نتیجهٔ تأیید",
+      "x": 930,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "نتیجهٔ تأیید"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n3",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n1",
+      "to": "n2",
+      "label": "اطلاعاتِ بازگشتِ ملت",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n2",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "payme_6",
+   "parent": "payme_5",
+   "kind": "task",
+   "title": "سنجشِ ResCode",
+   "order": 6,
+   "summary": "",
+   "details": "",
+   "process": "کدِ غیر از صفر یعنی بانک پرداخت را نپذیرفته؛ درخواستِ verify بی‌معنی است.",
+   "tech": "gw_mellat_verify.",
+   "inputs": [
+    {
+     "name": "بازگشتِ درگاه",
+     "desc": "پارامترهایی که بانک به نشانیِ بازگشت می‌فرستد",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "اطلاعاتِ بازگشتِ ملت",
+     "desc": "ResCode، SaleOrderId، SaleReferenceId",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 0.5,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "بازگشتِ درگاه",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "بازگشتِ درگاه"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "decision",
+      "text": "ResCode برابر ۰ است؟",
+      "x": 215,
+      "y": 210,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "پیام: «پرداخت لغو شد یا ناموفق بود (کد …)»",
+      "x": 550,
+      "y": 230,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 340,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "SaleOrderId، SaleReferenceId را به عددِ صحیح ببر",
+      "x": 220,
+      "y": 385,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "io",
+      "text": "اطلاعاتِ بازگشتِ ملت",
+      "x": 220,
+      "y": 500,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "اطلاعاتِ بازگشتِ ملت"
+      }
+     },
+     {
+      "id": "n8",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 605,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n3",
+      "to": "n6",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n7",
+      "to": "n8",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "payme_7",
+   "parent": "payme_5",
+   "kind": "task",
+   "title": "verify و settle",
+   "order": 7,
+   "summary": "",
+   "details": "اگر verify موفق شد و settle شکست خورد، پرداخت موفق اعلام نشود تا ابهامِ پول پیگیری شود.",
+   "process": "بدونِ settle پول به حسابِ فروشنده نمی‌نشیند؛ کدِ ۴۵ یعنی قبلاً تسویه شده و موفق حساب می‌شود.",
+   "tech": "ref = SaleReferenceId.",
+   "inputs": [
+    {
+     "name": "اطلاعاتِ بازگشتِ ملت",
+     "desc": "ResCode، SaleOrderId، SaleReferenceId",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "نتیجهٔ تأیید",
+     "desc": "{ok, ref, error}",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 1.5,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "اطلاعاتِ بازگشتِ ملت",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "اطلاعاتِ بازگشتِ ملت"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "bpVerifyRequest با terminalId، userName، userPassword، orderId، saleOrderId، saleReferenceId",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "decision",
+      "text": "کدِ verify صفر است؟",
+      "x": 215,
+      "y": 325,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "process",
+      "text": "خطا: «تأیید تراکنش ناموفق بود (کد …)»",
+      "x": 550,
+      "y": 345,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 455,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "process",
+      "text": "bpSettleRequest با همان آرگومان‌ها",
+      "x": 220,
+      "y": 500,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "decision",
+      "text": "کدِ settle ۰ یا ۴۵ است؟",
+      "x": 215,
+      "y": 615,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "process",
+      "text": "خطا: «ثبت نهایی ناموفق بود»",
+      "x": 550,
+      "y": 635,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n10",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 745,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n11",
+      "type": "io",
+      "text": "نتیجهٔ تأیید",
+      "x": 220,
+      "y": 790,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "نتیجهٔ تأیید"
+      }
+     },
+     {
+      "id": "n12",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 895,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n4",
+      "to": "n7",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n7",
+      "to": "n8",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n8",
+      "to": "n9",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e9",
+      "from": "n9",
+      "to": "n10",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e10",
+      "from": "n8",
+      "to": "n11",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e11",
+      "from": "n11",
+      "to": "n12",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  }
+ ],
+ "dependencies": [
+  {
+   "from": "payme_1",
+   "to": "payme_2",
+   "bnd": "in",
+   "out": "درخواستِ شروعِ درگاه",
+   "in": "درخواستِ شروعِ درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_1",
+   "to": "payme_2",
+   "bnd": "in",
+   "out": "تنظیماتِ درگاه",
+   "in": "تنظیماتِ درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_1",
+   "to": "payme_5",
+   "bnd": "in",
+   "out": "بازگشتِ درگاه",
+   "in": "بازگشتِ درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_1",
+   "to": "payme_5",
+   "bnd": "in",
+   "out": "تنظیماتِ درگاه",
+   "in": "تنظیماتِ درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_2",
+   "to": "payme_1",
+   "bnd": "out",
+   "out": "نشانیِ انتقال به درگاه",
+   "in": "نشانیِ انتقال به درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_5",
+   "to": "payme_1",
+   "bnd": "out",
+   "out": "نتیجهٔ تأیید",
+   "in": "نتیجهٔ تأیید",
+   "label": ""
+  },
+  {
+   "from": "payme_2",
+   "to": "payme_5",
+   "out": "شناسهٔ تراکنشِ ذخیره‌شده",
+   "in": "شناسهٔ تراکنشِ ذخیره‌شده",
+   "label": ""
+  },
+  {
+   "from": "payme_2",
+   "to": "payme_3",
+   "bnd": "in",
+   "out": "درخواستِ شروعِ درگاه",
+   "in": "درخواستِ شروعِ درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_4",
+   "to": "payme_2",
+   "bnd": "out",
+   "out": "نشانیِ انتقال به درگاه",
+   "in": "نشانیِ انتقال به درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_3",
+   "to": "payme_4",
+   "out": "RefId ملت",
+   "in": "RefId ملت",
+   "label": ""
+  },
+  {
+   "from": "payme_5",
+   "to": "payme_6",
+   "bnd": "in",
+   "out": "بازگشتِ درگاه",
+   "in": "بازگشتِ درگاه",
+   "label": ""
+  },
+  {
+   "from": "payme_7",
+   "to": "payme_5",
+   "bnd": "out",
+   "out": "نتیجهٔ تأیید",
+   "in": "نتیجهٔ تأیید",
+   "label": ""
+  },
+  {
+   "from": "payme_6",
+   "to": "payme_7",
+   "out": "اطلاعاتِ بازگشتِ ملت",
+   "in": "اطلاعاتِ بازگشتِ ملت",
+   "label": ""
+  }
+ ],
+ "milestones": [],
+ "logs": [],
+ "work_report": []
+}

@@ -1,0 +1,3059 @@
+{
+ "schema": "weby-projectmanager/1",
+ "library_module": {
+  "slug": "torob",
+  "title": "اتصال به ترب (API، وبهوک، انتسابِ فروش)",
+  "version": 1
+ },
+ "project": {
+  "name": "کتابخانهٔ ماژول‌ها"
+ },
+ "nodes": [
+  {
+   "id": "tb_1",
+   "parent": null,
+   "kind": "module",
+   "title": "اتصال به ترب (API، وبهوک، انتسابِ فروش)",
+   "order": 1,
+   "summary": "اتصالِ فروشگاه به ترب: API محصولاتِ نسخهٔ ۳ با JWT، وبهوکِ آنیِ قیمت، و انتسابِ فروش با torob_clid.",
+   "details": "سه مسیر مستقل و پیش‌فرض خاموش‌اند؛ هر کدام جدا روشن می‌شود و رفتارِ سایت بدونِ آن‌ها تغییر نمی‌کند: ۱) API نسخهٔ ۳ (برای فروشگاه‌های بزرگ)، ۲) وبهوک، ۳) انتسابِ فروش. فیدِ قدیمیِ torob.php دست‌نخورده می‌ماند.\n\nابزارِ عیب‌یابی: tools/torob-check.php (گزارشِ سلامت) و tools/torob-products.php (آنچه می‌فرستیم و استعلام). پایشِ قیمتِ رقیب (torob-watch) و آینهٔ ترب (torob-mirror) ماژول‌های جدایند.",
+   "process": "",
+   "tech": "مرجع: Torob-Sync (product_api_v3.md, torob_api_token_guide.md, product_webhook.md, order_tracking_api.md). فایل‌ها: includes/torob-api.php, torob-orders.php, torob-notify.php; تنظیم‌ها: torob_api_enabled, torob_api_aud, torob_hook_cursor, torob_orders_enabled.",
+   "inputs": [
+    {
+     "name": "درخواستِ ترب",
+     "desc": "GET/POST از سرورهای ترب با هدرِ X-Torob-Token (JWT) و page_uniques یا نشانی‌ها یا sort/page",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "کاتالوگِ فروشگاه",
+     "desc": "محصولات، ترکیب‌ها (variant)، قیمتِ نهایی، موجودی، تصویر، دسته‌بندی و نشانیِ صفحه",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "تغییرِ قیمت و موجودی",
+     "desc": "ستونِ products.updated_at (و قیمت‌های لحظه‌ای: پیشنهادِ زمان‌دار، تخفیفِ گروهی)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "کلیکِ ورودیِ ترب",
+     "desc": "پارامترِ ?torob_clid=… در نشانیِ هر صفحهٔ عمومی",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "سفارشِ ثبت‌شده",
+     "desc": "سفارشِ تازه‌ثبت‌شده در تسویه‌حساب (با کوکیِ torob_clid)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "پاسخِ محصولات",
+     "desc": "JSON با فهرستِ محصول/ترکیب: page_unique، title، current_price، availability، قیمتِ قبل، تصویر…",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "اعلانِ وبهوک",
+     "desc": "دستهٔ تغییرها (قیمت/موجودی) که به ترب فرستاده شد و نشانگرِ پیشرفت",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "گزارشِ سفارش‌های ترب",
+     "desc": "فهرستِ سفارش‌های منتسب به ترب برای order tracking (وضعیتِ completed/cancelled، تاریخ UTC، ارزش به تومان)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "🛒",
+   "color": "#f97316",
+   "est_days": 14,
+   "tags": "ترب، API، وبهوک، JWT",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "sub",
+      "text": "API محصولاتِ نسخهٔ ۳",
+      "x": 330,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "sub",
+      "text": "وبهوکِ خبرِ آنی",
+      "x": 330,
+      "y": 140,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n3",
+      "type": "sub",
+      "text": "انتسابِ فروش (Order Tracking)",
+      "x": 330,
+      "y": 260,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "io",
+      "text": "درخواستِ ترب",
+      "x": 0,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "درخواستِ ترب"
+      }
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "کاتالوگِ فروشگاه",
+      "x": 0,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "کاتالوگِ فروشگاه"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "io",
+      "text": "تغییرِ قیمت و موجودی",
+      "x": 0,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "تغییرِ قیمت و موجودی"
+      }
+     },
+     {
+      "id": "n7",
+      "type": "io",
+      "text": "کلیکِ ورودیِ ترب",
+      "x": 0,
+      "y": 310,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "کلیکِ ورودیِ ترب"
+      }
+     },
+     {
+      "id": "n8",
+      "type": "io",
+      "text": "سفارشِ ثبت‌شده",
+      "x": 0,
+      "y": 410,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "سفارشِ ثبت‌شده"
+      }
+     },
+     {
+      "id": "n9",
+      "type": "io",
+      "text": "پاسخِ محصولات",
+      "x": 630,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "پاسخِ محصولات"
+      }
+     },
+     {
+      "id": "n10",
+      "type": "io",
+      "text": "اعلانِ وبهوک",
+      "x": 630,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "اعلانِ وبهوک"
+      }
+     },
+     {
+      "id": "n11",
+      "type": "io",
+      "text": "گزارشِ سفارش‌های ترب",
+      "x": 630,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "گزارشِ سفارش‌های ترب"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n4",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n5",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n6",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n7",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n8",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n1",
+      "to": "n9",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n2",
+      "to": "n10",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n3",
+      "to": "n11",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_2",
+   "parent": "tb_1",
+   "kind": "section",
+   "title": "API محصولاتِ نسخهٔ ۳",
+   "order": 2,
+   "summary": "احرازِ هویتِ ترب، واحدِ ارسال، تطبیقِ درخواست و ساختِ پاسخ",
+   "details": "ترب بر اساس page_uniques یا نشانی‌ها محصولِ مشخص می‌خواهد یا کلِ فهرست را صفحه‌به‌صفحه می‌خواند. هر سه حالت از همین مسیر رد می‌شوند.",
+   "process": "",
+   "tech": "",
+   "inputs": [
+    {
+     "name": "درخواستِ ترب",
+     "desc": "GET/POST از سرورهای ترب با هدرِ X-Torob-Token (JWT) و page_uniques یا نشانی‌ها یا sort/page",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "کاتالوگِ فروشگاه",
+     "desc": "محصولات، ترکیب‌ها (variant)، قیمتِ نهایی، موجودی، تصویر، دسته‌بندی و نشانیِ صفحه",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "پاسخِ محصولات",
+     "desc": "JSON با فهرستِ محصول/ترکیب: page_unique، title، current_price، availability، قیمتِ قبل، تصویر…",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "📦",
+   "color": null,
+   "est_days": null,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "process",
+      "text": "احرازِ هویتِ JWT (EdDSA)",
+      "x": 330,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "process",
+      "text": "واحدِ ارسال و page_unique",
+      "x": 630,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "تطبیقِ درخواست",
+      "x": 930,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "ساختنِ پاسخ",
+      "x": 1230,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "درخواستِ ترب",
+      "x": 0,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "درخواستِ ترب"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "io",
+      "text": "کاتالوگِ فروشگاه",
+      "x": 0,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "کاتالوگِ فروشگاه"
+      }
+     },
+     {
+      "id": "n7",
+      "type": "io",
+      "text": "پاسخِ محصولات",
+      "x": 1530,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "پاسخِ محصولات"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n5",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n1",
+      "to": "n2",
+      "label": "درخواستِ احرازشده",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n2",
+      "to": "n3",
+      "label": "واحدهای قابلِ ارسال",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n3",
+      "to": "n4",
+      "label": "واحدهای تطبیق‌خورده",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n4",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_3",
+   "parent": "tb_2",
+   "kind": "task",
+   "title": "احرازِ هویتِ JWT (EdDSA)",
+   "order": 3,
+   "summary": "",
+   "details": "JWT بدونِ کتابخانهٔ composer نوشته شده: base64url، سه بخش، verify با sodium_crypto_sign_verify_detached. آزمون دو بار اجرا می‌شود: یک بار عادی و یک بار با sodium غیرفعال تا دو پیاده‌سازی یک بیت فرق نکنند.",
+   "process": "چهار چیز بررسی می‌شود: امضا، exp، nbf، aud. هر شکستی ۴۰۱ است و دلیلش در لاگِ احرازِ ناموفق می‌نشیند.",
+   "tech": "torob_token_valid(jwt,&err), torob_verify_sign, torob_expected_aud, includes/vendor/sodium-compat/ (paragonie v2.5.2).",
+   "inputs": [
+    {
+     "name": "درخواستِ ترب",
+     "desc": "GET/POST از سرورهای ترب با هدرِ X-Torob-Token (JWT) و page_uniques یا نشانی‌ها یا sort/page",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "درخواستِ احرازشده",
+     "desc": "درخواستِ ترب پس از اعتبارِ توکن",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 3,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "درخواستِ ترب",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "درخواستِ ترب"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "خواندنِ توکن از هدرِ X-Torob-Token",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "decision",
+      "text": "امضای ed25519 با کلیدِ عمومیِ ترب درست است؟",
+      "x": 215,
+      "y": 325,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "process",
+      "text": "۴۰۱ (امضا)",
+      "x": 550,
+      "y": 345,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 455,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "decision",
+      "text": "exp و nbf معتبرند؟",
+      "x": 215,
+      "y": 500,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "process",
+      "text": "۴۰۱",
+      "x": 550,
+      "y": 520,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 630,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n10",
+      "type": "decision",
+      "text": "aud برابرِ مقدارِ انتظاری است؟ (از SITE_URL، نه از هدرِ Host؛ torob_api_aud بازنویسی می‌کند)",
+      "x": 215,
+      "y": 675,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n11",
+      "type": "process",
+      "text": "۴۰۱ — بدونِ aud توکنِ فروشگاهِ دیگر هم کار می‌کرد",
+      "x": 550,
+      "y": 695,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n12",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 805,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n13",
+      "type": "note",
+      "text": "افزونهٔ sodium نبود؟ sodium_compat (PHP خالص، ≈۱۰۰ms). هیچ‌کدام نبود: ۴۰۱ (درِ باز بدتر از درِ بسته است)",
+      "x": 550,
+      "y": 750,
+      "w": 220,
+      "h": 100,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n14",
+      "type": "io",
+      "text": "درخواستِ احرازشده",
+      "x": 220,
+      "y": 850,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "درخواستِ احرازشده"
+      }
+     },
+     {
+      "id": "n15",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 955,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n4",
+      "to": "n7",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n7",
+      "to": "n8",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n8",
+      "to": "n9",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e9",
+      "from": "n7",
+      "to": "n10",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e10",
+      "from": "n10",
+      "to": "n11",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e11",
+      "from": "n11",
+      "to": "n12",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e12",
+      "from": "n10",
+      "to": "n14",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e13",
+      "from": "n14",
+      "to": "n15",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_4",
+   "parent": "tb_2",
+   "kind": "task",
+   "title": "واحدِ ارسال و page_unique",
+   "order": 4,
+   "summary": "",
+   "details": "نشانیِ صفحه از torob_page_url(product, variant) ساخته می‌شود. اگر کدِ کالا (SKU) هم پرسیده شود، همان کد یک شناسهٔ معتبر است.",
+   "process": "فروشگاه‌هایی که ترکیب دارند هر ترکیب را جداگانه می‌فرستند تا قیمتِ هر رنگ/اندازه دقیق باشد.",
+   "tech": "torob_units(opt), torob_page_unique(pid,vid), torob_page_url.",
+   "inputs": [
+    {
+     "name": "درخواستِ احرازشده",
+     "desc": "درخواستِ ترب پس از اعتبارِ توکن",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "واحدهای قابلِ ارسال",
+     "desc": "فهرستِ محصول/ترکیب با page_unique",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 2,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "درخواستِ احرازشده",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "درخواستِ احرازشده"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "decision",
+      "text": "محصول ترکیب (variant) دارد؟",
+      "x": 215,
+      "y": 210,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "واحد = خودِ محصول: page_unique=«12»",
+      "x": 550,
+      "y": 230,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 340,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "واحد = هر ترکیب: page_unique = «شناسهٔ محصول_شناسهٔ ترکیب» مثل «12_7»",
+      "x": 220,
+      "y": 385,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "note",
+      "text": "page_unique هرگز نباید عوض شود؛ ترب با آن قیمت‌ها را نگه می‌دارد",
+      "x": 550,
+      "y": 400,
+      "w": 220,
+      "h": 100,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "io",
+      "text": "واحدهای قابلِ ارسال",
+      "x": 220,
+      "y": 500,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "واحدهای قابلِ ارسال"
+      }
+     },
+     {
+      "id": "n9",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 605,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n3",
+      "to": "n6",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n8",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n8",
+      "to": "n9",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_5",
+   "parent": "tb_2",
+   "kind": "task",
+   "title": "تطبیقِ درخواست",
+   "order": 5,
+   "summary": "",
+   "details": "نشانیِ قدیمی/بازنویسی‌شده هم باید به همان محصول برسد (aliases). ابزارِ tools/torob-products.php استعلام را بدونِ ترب شبیه‌سازی می‌کند.",
+   "process": "اگر ترب «خارج از فهرست» پرسید، باید هر پرسش یک ردیفِ پاسخ بگیرد؛ ردیفِ جاافتاده یعنی ترب آن را «ناموجود» می‌داند.",
+   "tech": "torob_match_requested(units,wanted,byUrl), torob_match_units, torob_pick_one, torob_aliases.",
+   "inputs": [
+    {
+     "name": "واحدهای قابلِ ارسال",
+     "desc": "فهرستِ محصول/ترکیب با page_unique",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "واحدهای تطبیق‌خورده",
+     "desc": "ردیف‌هایی که باید در پاسخ بیایند",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 3,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "واحدهای قابلِ ارسال",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "واحدهای قابلِ ارسال"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "شناسه‌های پرسیده‌شده: page_unique، نشانی (url_key)، یا کدِ کالا",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "مراحل: تطابقِ دقیق ← نشانی ← محصول یافته‌شده (همهٔ ترکیب‌ها) ← کدِ کالا ← نامِ مستعار (torob_alias_map)",
+      "x": 220,
+      "y": 325,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "decision",
+      "text": "کدی که دیگر به محصولی نمی‌خورد؟",
+      "x": 215,
+      "y": 440,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "ردیفِ «ناموجود» با همان شناسه‌ای که پرسیده شد",
+      "x": 550,
+      "y": 460,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 570,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "note",
+      "text": "یک پرسش = یک ردیف، با همان شناسه/نشانیِ پرسیده‌شده در پاسخ",
+      "x": 550,
+      "y": 515,
+      "w": 220,
+      "h": 100,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "io",
+      "text": "واحدهای تطبیق‌خورده",
+      "x": 220,
+      "y": 615,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "واحدهای تطبیق‌خورده"
+      }
+     },
+     {
+      "id": "n10",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 720,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n5",
+      "to": "n9",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n9",
+      "to": "n10",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_6",
+   "parent": "tb_2",
+   "kind": "task",
+   "title": "ساختنِ پاسخ",
+   "order": 6,
+   "summary": "",
+   "details": "اگر قیمت در صفحه با ترب فرق کند، ترب محصول را «ناهماهنگ» می‌شمارد و رتبه می‌دهد پایین.",
+   "process": "پاسخ همان قیمتی است که مشتری در سایت می‌بیند؛ نه قیمتِ فهرستِ قدیمی.",
+   "tech": "torob_products_payload(units), torob_api_log, torob_iso, torob_cut, torob_media_url.",
+   "inputs": [
+    {
+     "name": "واحدهای تطبیق‌خورده",
+     "desc": "ردیف‌هایی که باید در پاسخ بیایند",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "پاسخِ محصولات",
+     "desc": "JSON با فهرستِ محصول/ترکیب: page_unique، title، current_price، availability، قیمتِ قبل، تصویر…",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 3,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "واحدهای تطبیق‌خورده",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "واحدهای تطبیق‌خورده"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "مرتب‌سازی (sort) و صفحه‌بندی",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "فیلدها: title، subtitle، current_price (تومان)، old_price، availability، image_links، category_name، guarantee، page_url…",
+      "x": 220,
+      "y": 325,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "process",
+      "text": "قیمتِ لحظه‌ای: پیشنهادِ زمان‌دار (deal) و تخفیفِ گروهی بدونِ ذخیره روی ردیف",
+      "x": 220,
+      "y": 440,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "لاگِ درخواست: نقطهٔ پایانی، حالت، تعدادِ آیتم، کد",
+      "x": 220,
+      "y": 555,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "io",
+      "text": "پاسخِ محصولات",
+      "x": 220,
+      "y": 670,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "پاسخِ محصولات"
+      }
+     },
+     {
+      "id": "n8",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 775,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n7",
+      "to": "n8",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_7",
+   "parent": "tb_1",
+   "kind": "section",
+   "title": "وبهوکِ خبرِ آنی",
+   "order": 7,
+   "summary": "خبردادنِ تغییرِ قیمت و موجودی بدونِ منتظرِ ماندن برای خزش",
+   "details": "فقط وقتی کلید روشن و توکنِ وبهوک ثبت شده باشد؛ با cron هر چند دقیقه یا با دکمه در پنل.",
+   "process": "",
+   "tech": "",
+   "inputs": [
+    {
+     "name": "تغییرِ قیمت و موجودی",
+     "desc": "ستونِ products.updated_at (و قیمت‌های لحظه‌ای: پیشنهادِ زمان‌دار، تخفیفِ گروهی)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "اعلانِ وبهوک",
+     "desc": "دستهٔ تغییرها (قیمت/موجودی) که به ترب فرستاده شد و نشانگرِ پیشرفت",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "📡",
+   "color": null,
+   "est_days": null,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "process",
+      "text": "یافتنِ تغییرها از نشانگر",
+      "x": 330,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "process",
+      "text": "ارسال به ترب و جلو بردنِ نشانگر",
+      "x": 630,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n3",
+      "type": "io",
+      "text": "تغییرِ قیمت و موجودی",
+      "x": 0,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "تغییرِ قیمت و موجودی"
+      }
+     },
+     {
+      "id": "n4",
+      "type": "io",
+      "text": "اعلانِ وبهوک",
+      "x": 930,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "اعلانِ وبهوک"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n3",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n1",
+      "to": "n2",
+      "label": "تغییرهای دسته‌بندی‌شده",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n2",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_8",
+   "parent": "tb_7",
+   "kind": "task",
+   "title": "یافتنِ تغییرها از نشانگر",
+   "order": 8,
+   "summary": "",
+   "details": "",
+   "process": "نشانگر در settings می‌ماند تا اجرای بعدی از همان‌جا ادامه دهد؛ اگر ارسال نصفه ماند، نشانگر جلو نمی‌رود.",
+   "tech": "torob_webhook_run(maxBatches), torob_hook_items_for(row), ستون products.updated_at.",
+   "inputs": [
+    {
+     "name": "تغییرِ قیمت و موجودی",
+     "desc": "ستونِ products.updated_at (و قیمت‌های لحظه‌ای: پیشنهادِ زمان‌دار، تخفیفِ گروهی)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "تغییرهای دسته‌بندی‌شده",
+     "desc": "ردیف‌ها و نشانگرِ پیشنهادی",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 2,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "تغییرِ قیمت و موجودی",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "تغییرِ قیمت و موجودی"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "torob_hook_cursor (آخرین updated_at که فرستادیم)",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "db",
+      "text": "SELECT محصول‌های با updated_at بزرگ‌تر از نشانگر",
+      "x": 220,
+      "y": 325,
+      "w": 190,
+      "h": 84,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "decision",
+      "text": "بیش از سقفِ هر دسته؟",
+      "x": 215,
+      "y": 445,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "دسته‌های ۲۰ تایی تا maxBatches",
+      "x": 550,
+      "y": 465,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 575,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "note",
+      "text": "قیمت‌های لحظه‌ای (deal، تخفیفِ گروهی) ستونِ updated_at را عوض نمی‌کنند؛ تاریخِ شروع/پایانشان هم محرک است",
+      "x": 550,
+      "y": 520,
+      "w": 220,
+      "h": 100,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "io",
+      "text": "تغییرهای دسته‌بندی‌شده",
+      "x": 220,
+      "y": 620,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "تغییرهای دسته‌بندی‌شده"
+      }
+     },
+     {
+      "id": "n10",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 725,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n5",
+      "to": "n9",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n9",
+      "to": "n10",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_9",
+   "parent": "tb_7",
+   "kind": "task",
+   "title": "ارسال به ترب و جلو بردنِ نشانگر",
+   "order": 9,
+   "summary": "",
+   "details": "دکمهٔ «ارسالِ فوری» (torob_webhook_push_now) برای تغییرِ دستی؛ تغییرِ تک‌محصول با torob_webhook_push_ids.",
+   "process": "هر دسته جدا تأیید می‌شود؛ شکست یک دسته چیزی را گم نمی‌کند.",
+   "tech": "torob_webhook_send(items,token)، torob_webhook_gate().",
+   "inputs": [
+    {
+     "name": "تغییرهای دسته‌بندی‌شده",
+     "desc": "ردیف‌ها و نشانگرِ پیشنهادی",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "اعلانِ وبهوک",
+     "desc": "دستهٔ تغییرها (قیمت/موجودی) که به ترب فرستاده شد و نشانگرِ پیشرفت",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 2,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "تغییرهای دسته‌بندی‌شده",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "تغییرهای دسته‌بندی‌شده"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "ساختِ آیتم‌ها با همان torob_products_payload",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "POST به نشانیِ وبهوکِ ترب با توکن",
+      "x": 220,
+      "y": 325,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "decision",
+      "text": "پاسخ موفق؟",
+      "x": 215,
+      "y": 440,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "نشانگر عقب بماند + لاگِ خطا (تلاشِ بعدی)",
+      "x": 550,
+      "y": 460,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 570,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "db",
+      "text": "torob_setting_put(\"torob_hook_cursor\", …)",
+      "x": 220,
+      "y": 615,
+      "w": 190,
+      "h": 84,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "io",
+      "text": "اعلانِ وبهوک",
+      "x": 220,
+      "y": 735,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "اعلانِ وبهوک"
+      }
+     },
+     {
+      "id": "n10",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 840,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n5",
+      "to": "n8",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n8",
+      "to": "n9",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e9",
+      "from": "n9",
+      "to": "n10",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_10",
+   "parent": "tb_1",
+   "kind": "section",
+   "title": "انتسابِ فروش (Order Tracking)",
+   "order": 10,
+   "summary": "گرفتنِ torob_clid، نوشتن روی سفارش و پاسخ به ترب",
+   "details": "کلیدِ torob_orders_enabled پیش‌فرض خاموش است و خاموشی ۴۰۳ می‌دهد (الزامِ ترب).",
+   "process": "",
+   "tech": "",
+   "inputs": [
+    {
+     "name": "کلیکِ ورودیِ ترب",
+     "desc": "پارامترِ ?torob_clid=… در نشانیِ هر صفحهٔ عمومی",
+     "use": "",
+     "unused": false,
+     "why": ""
+    },
+    {
+     "name": "سفارشِ ثبت‌شده",
+     "desc": "سفارشِ تازه‌ثبت‌شده در تسویه‌حساب (با کوکیِ torob_clid)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "گزارشِ سفارش‌های ترب",
+     "desc": "فهرستِ سفارش‌های منتسب به ترب برای order tracking (وضعیتِ completed/cancelled، تاریخ UTC، ارزش به تومان)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "🧭",
+   "color": null,
+   "est_days": null,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "process",
+      "text": "گرفتنِ شناسهٔ کلیک",
+      "x": 330,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "process",
+      "text": "نوشتن روی سفارش",
+      "x": 630,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "پاسخ به ترب",
+      "x": 930,
+      "y": 20,
+      "w": 210,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "io",
+      "text": "کلیکِ ورودیِ ترب",
+      "x": 0,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "کلیکِ ورودیِ ترب"
+      }
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "سفارشِ ثبت‌شده",
+      "x": 0,
+      "y": 110,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "سفارشِ ثبت‌شده"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "io",
+      "text": "گزارشِ سفارش‌های ترب",
+      "x": 1230,
+      "y": 10,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "گزارشِ سفارش‌های ترب"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n4",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n1",
+      "to": "n2",
+      "label": "شناسهٔ کلیکِ نگه‌داری‌شده",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n2",
+      "to": "n3",
+      "label": "سفارشِ منتسب",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n3",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n1",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_11",
+   "parent": "tb_10",
+   "kind": "task",
+   "title": "گرفتنِ شناسهٔ کلیک",
+   "order": 11,
+   "summary": "",
+   "details": "",
+   "process": "کاربرِ آمده از ترب تا یک هفته با همان شناسه شناخته می‌شود.",
+   "tech": "torob_clid_capture() از header.php؛ torob_clid_current().",
+   "inputs": [
+    {
+     "name": "کلیکِ ورودیِ ترب",
+     "desc": "پارامترِ ?torob_clid=… در نشانیِ هر صفحهٔ عمومی",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "شناسهٔ کلیکِ نگه‌داری‌شده",
+     "desc": "مقدارِ پاک‌شدهٔ torob_clid",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 1,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "کلیکِ ورودیِ ترب",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "کلیکِ ورودیِ ترب"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "decision",
+      "text": "پارامترِ torob_clid در نشانی هست؟",
+      "x": 215,
+      "y": 210,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "کاری نکن (کوکیِ قبلی بماند)",
+      "x": 550,
+      "y": 230,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 340,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "process",
+      "text": "پاک‌سازی (حروف/رقم/نشانه‌های مجاز، طولِ کوتاه)",
+      "x": 220,
+      "y": 385,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "process",
+      "text": "کوکی ۷ روز (پنجرهٔ ۱۶۸ساعتهٔ ترب)",
+      "x": 220,
+      "y": 500,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "note",
+      "text": "روی هر صفحهٔ عمومی صدا زده می‌شود (ترب ممکن است به دسته یا صفحهٔ اصلی لینک بدهد)، نه فقط محصول",
+      "x": 550,
+      "y": 515,
+      "w": 220,
+      "h": 100,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "io",
+      "text": "شناسهٔ کلیکِ نگه‌داری‌شده",
+      "x": 220,
+      "y": 615,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "شناسهٔ کلیکِ نگه‌داری‌شده"
+      }
+     },
+     {
+      "id": "n10",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 720,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n3",
+      "to": "n6",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n7",
+      "to": "n9",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n9",
+      "to": "n10",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_12",
+   "parent": "tb_10",
+   "kind": "task",
+   "title": "نوشتن روی سفارش",
+   "order": 12,
+   "summary": "",
+   "details": "",
+   "process": "شناسه کنارِ سفارش می‌ماند تا بعداً بشود منتسبش کرد.",
+   "tech": "checkout.php؛ UPDATE جدا.",
+   "inputs": [
+    {
+     "name": "شناسهٔ کلیکِ نگه‌داری‌شده",
+     "desc": "مقدارِ پاک‌شدهٔ torob_clid",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "سفارشِ منتسب",
+     "desc": "سفارش با torob_clid",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 1,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "شناسهٔ کلیکِ نگه‌داری‌شده",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "شناسهٔ کلیکِ نگه‌داری‌شده"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "process",
+      "text": "پس از INSERTِ سفارش، شناسه را در orders.torob_clid بنویس",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "note",
+      "text": "جدا از INSERT: اگر ستون هنوز ساخته نشده، ثبتِ سفارش نباید بشکند",
+      "x": 550,
+      "y": 225,
+      "w": 220,
+      "h": 100,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "io",
+      "text": "سفارشِ منتسب",
+      "x": 220,
+      "y": 325,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "سفارشِ منتسب"
+      }
+     },
+     {
+      "id": "n6",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 430,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n5",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  },
+  {
+   "id": "tb_13",
+   "parent": "tb_10",
+   "kind": "task",
+   "title": "پاسخ به ترب",
+   "order": 13,
+   "summary": "",
+   "details": "GET /torob/v1/orders?purchase_timestamp_gt=…&limit=…؛ احراز با همان JWT.",
+   "process": "گزارشِ دقیقِ فروشِ آمده از ترب برای محاسبهٔ کمیسیون و رتبه.",
+   "tech": "torob_orders_feed(gt, limit)، torob_order_status، torob_utc.",
+   "inputs": [
+    {
+     "name": "سفارشِ منتسب",
+     "desc": "سفارش با torob_clid",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "outputs": [
+    {
+     "name": "گزارشِ سفارش‌های ترب",
+     "desc": "فهرستِ سفارش‌های منتسب به ترب برای order tracking (وضعیتِ completed/cancelled، تاریخ UTC، ارزش به تومان)",
+     "use": "",
+     "unused": false,
+     "why": ""
+    }
+   ],
+   "icon": "✔️",
+   "color": null,
+   "est_days": 2,
+   "tags": "",
+   "priority": 2,
+   "status": "todo",
+   "progress": 0,
+   "flow": {
+    "v": 1,
+    "nodes": [
+     {
+      "id": "n1",
+      "type": "start",
+      "text": "شروع",
+      "x": 245,
+      "y": 0,
+      "w": 140,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n2",
+      "type": "io",
+      "text": "سفارشِ منتسب",
+      "x": 220,
+      "y": 100,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "in",
+       "name": "سفارشِ منتسب"
+      }
+     },
+     {
+      "id": "n3",
+      "type": "db",
+      "text": "فقط سفارش‌هایی که torob_clid دارند و پرداخت‌نشده نیستند (در خودِ کوئری)",
+      "x": 220,
+      "y": 210,
+      "w": 190,
+      "h": 84,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n4",
+      "type": "process",
+      "text": "وضعیت: canceled→cancelled و بقیه→completed؛ pending اصلاً نمی‌رود",
+      "x": 220,
+      "y": 330,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n5",
+      "type": "process",
+      "text": "تاریخ‌ها UTC با Z، مبلغ‌ها تومان؛ order_value = subtotal − discount",
+      "x": 220,
+      "y": 445,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n6",
+      "type": "decision",
+      "text": "torob_orders_enabled خاموش است؟",
+      "x": 215,
+      "y": 560,
+      "w": 190,
+      "h": 110,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n7",
+      "type": "process",
+      "text": "۴۰۳",
+      "x": 550,
+      "y": 580,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n8",
+      "type": "end",
+      "text": "پایانِ ناموفق",
+      "x": 575,
+      "y": 690,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     },
+     {
+      "id": "n9",
+      "type": "io",
+      "text": "گزارشِ سفارش‌های ترب",
+      "x": 220,
+      "y": 735,
+      "w": 190,
+      "h": 66,
+      "color": null,
+      "port": {
+       "side": "out",
+       "name": "گزارشِ سفارش‌های ترب"
+      }
+     },
+     {
+      "id": "n10",
+      "type": "end",
+      "text": "پایان",
+      "x": 245,
+      "y": 840,
+      "w": 150,
+      "h": 52,
+      "color": null,
+      "port": null
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e4",
+      "from": "n4",
+      "to": "n5",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e5",
+      "from": "n5",
+      "to": "n6",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e6",
+      "from": "n6",
+      "to": "n7",
+      "label": "خیر",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e7",
+      "from": "n7",
+      "to": "n8",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e8",
+      "from": "n6",
+      "to": "n9",
+      "label": "بله",
+      "color": null,
+      "fa": null,
+      "ta": null
+     },
+     {
+      "id": "e9",
+      "from": "n9",
+      "to": "n10",
+      "label": "",
+      "color": null,
+      "fa": null,
+      "ta": null
+     }
+    ]
+   },
+   "src_name": null,
+   "x": null,
+   "y": null
+  }
+ ],
+ "dependencies": [
+  {
+   "from": "tb_1",
+   "to": "tb_2",
+   "bnd": "in",
+   "out": "درخواستِ ترب",
+   "in": "درخواستِ ترب",
+   "label": ""
+  },
+  {
+   "from": "tb_1",
+   "to": "tb_2",
+   "bnd": "in",
+   "out": "کاتالوگِ فروشگاه",
+   "in": "کاتالوگِ فروشگاه",
+   "label": ""
+  },
+  {
+   "from": "tb_1",
+   "to": "tb_7",
+   "bnd": "in",
+   "out": "تغییرِ قیمت و موجودی",
+   "in": "تغییرِ قیمت و موجودی",
+   "label": ""
+  },
+  {
+   "from": "tb_1",
+   "to": "tb_10",
+   "bnd": "in",
+   "out": "کلیکِ ورودیِ ترب",
+   "in": "کلیکِ ورودیِ ترب",
+   "label": ""
+  },
+  {
+   "from": "tb_1",
+   "to": "tb_10",
+   "bnd": "in",
+   "out": "سفارشِ ثبت‌شده",
+   "in": "سفارشِ ثبت‌شده",
+   "label": ""
+  },
+  {
+   "from": "tb_2",
+   "to": "tb_1",
+   "bnd": "out",
+   "out": "پاسخِ محصولات",
+   "in": "پاسخِ محصولات",
+   "label": ""
+  },
+  {
+   "from": "tb_7",
+   "to": "tb_1",
+   "bnd": "out",
+   "out": "اعلانِ وبهوک",
+   "in": "اعلانِ وبهوک",
+   "label": ""
+  },
+  {
+   "from": "tb_10",
+   "to": "tb_1",
+   "bnd": "out",
+   "out": "گزارشِ سفارش‌های ترب",
+   "in": "گزارشِ سفارش‌های ترب",
+   "label": ""
+  },
+  {
+   "from": "tb_2",
+   "to": "tb_3",
+   "bnd": "in",
+   "out": "درخواستِ ترب",
+   "in": "درخواستِ ترب",
+   "label": ""
+  },
+  {
+   "from": "tb_6",
+   "to": "tb_2",
+   "bnd": "out",
+   "out": "پاسخِ محصولات",
+   "in": "پاسخِ محصولات",
+   "label": ""
+  },
+  {
+   "from": "tb_3",
+   "to": "tb_4",
+   "out": "درخواستِ احرازشده",
+   "in": "درخواستِ احرازشده",
+   "label": ""
+  },
+  {
+   "from": "tb_4",
+   "to": "tb_5",
+   "out": "واحدهای قابلِ ارسال",
+   "in": "واحدهای قابلِ ارسال",
+   "label": ""
+  },
+  {
+   "from": "tb_5",
+   "to": "tb_6",
+   "out": "واحدهای تطبیق‌خورده",
+   "in": "واحدهای تطبیق‌خورده",
+   "label": ""
+  },
+  {
+   "from": "tb_7",
+   "to": "tb_8",
+   "bnd": "in",
+   "out": "تغییرِ قیمت و موجودی",
+   "in": "تغییرِ قیمت و موجودی",
+   "label": ""
+  },
+  {
+   "from": "tb_9",
+   "to": "tb_7",
+   "bnd": "out",
+   "out": "اعلانِ وبهوک",
+   "in": "اعلانِ وبهوک",
+   "label": ""
+  },
+  {
+   "from": "tb_8",
+   "to": "tb_9",
+   "out": "تغییرهای دسته‌بندی‌شده",
+   "in": "تغییرهای دسته‌بندی‌شده",
+   "label": ""
+  },
+  {
+   "from": "tb_10",
+   "to": "tb_11",
+   "bnd": "in",
+   "out": "کلیکِ ورودیِ ترب",
+   "in": "کلیکِ ورودیِ ترب",
+   "label": ""
+  },
+  {
+   "from": "tb_13",
+   "to": "tb_10",
+   "bnd": "out",
+   "out": "گزارشِ سفارش‌های ترب",
+   "in": "گزارشِ سفارش‌های ترب",
+   "label": ""
+  },
+  {
+   "from": "tb_11",
+   "to": "tb_12",
+   "out": "شناسهٔ کلیکِ نگه‌داری‌شده",
+   "in": "شناسهٔ کلیکِ نگه‌داری‌شده",
+   "label": ""
+  },
+  {
+   "from": "tb_12",
+   "to": "tb_13",
+   "out": "سفارشِ منتسب",
+   "in": "سفارشِ منتسب",
+   "label": ""
+  }
+ ],
+ "milestones": [],
+ "logs": [],
+ "work_report": []
+}

@@ -156,6 +156,7 @@ function pm_clean_node(array $in): array
     foreach (['inputs', 'outputs'] as $k) if (array_key_exists($k, $in)) $o[$k] = json_encode(pm_io($in[$k]), JSON_UNESCAPED_UNICODE);
     foreach (['x', 'y'] as $k) if (array_key_exists($k, $in)) $o[$k] = is_numeric($in[$k]) ? max(-100000, min(100000, round((float)$in[$k], 1))) : null;
     if (array_key_exists('color', $in)) $o['color'] = pm_color($in['color']);
+    if (array_key_exists('src_name', $in)) $o['src_name'] = mb_substr(trim((string)$in['src_name']), 0, 200) ?: null;
     if (array_key_exists('icon', $in)) $o['icon'] = mb_substr(trim((string)$in['icon']), 0, 8) ?: null;
     if (array_key_exists('flow', $in)) { $fl = pm_flow_clean($in['flow']); $o['flow'] = $fl ? json_encode($fl, JSON_UNESCAPED_UNICODE) : null; }
     return $o;

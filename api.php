@@ -175,6 +175,57 @@ try {
             }
             out(['library_id' => $lid, 'modules' => $mods]);
 
+        // ---- ماژول‌ها و پروژه‌های آمادهٔ همراهِ برنامه (library/*.pm.json)
+        case 'bundled_catalog': {
+            $files = glob(__DIR__ . '/library/*.pm.json') ?: [];
+            $lib = pm_library_id($db);
+            $have = $db->prepare("SELECT title FROM nodes WHERE project_id=? AND parent_id IS NULL AND kind='module'");
+            $have->execute([$lib]);
+            $haveT = array_flip($have->fetchAll(PDO::FETCH_COLUMN));
+            $hp = array_flip($db->query("SELECT name FROM projects WHERE kind='project'")->fetchAll(PDO::FETCH_COLUMN));
+            $mods = []; $projs = [];
+            foreach ($files as $f) {
+                $j = json_decode((string)file_get_contents($f), true);
+                if (!is_array($j)) continue;
+                $base = basename($f);
+                if (!empty($j['library_module'])) {
+                    $root = null;
+                    foreach ($j['nodes'] ?? [] as $n) if (empty($n['parent'])) { $root = $n; break; }
+                    $mods[] = ['file' => $base, 'title' => $j['library_module']['title'] ?? $base, 'summary' => $root['summary'] ?? '', 'icon' => $root['icon'] ?? '🧩',
+                        'nodes' => count($j['nodes'] ?? []), 'inputs' => count($root['inputs'] ?? []), 'outputs' => count($root['outputs'] ?? []), 'group' => $j['library_module']['group'] ?? '',
+                        'installed' => isset($haveT[$j['library_module']['title'] ?? ''])];
+                } elseif (!empty($j['bundled_project'])) {
+                    $projs[] = ['file' => $base, 'title' => $j['bundled_project']['title'] ?? $base, 'summary' => $j['bundled_project']['summary'] ?? '', 'nodes' => count($j['nodes'] ?? []),
+                        'installed' => isset($hp[$j['project']['name'] ?? ''])];
+                }
+            }
+            out(['modules' => $mods, 'projects' => $projs]);
+        }
+
+        case 'bundled_import': {     // files: ['x.pm.json', ...] — ماژول‌ها وارد کتابخانه، پروژه‌ها پروژهٔ تازه می‌شوند
+            $names = is_array($in['files'] ?? null) ? $in['files'] : [];
+            $lib = pm_library_id($db);
+            $res = ['modules' => 0, 'projects' => 0, 'skipped' => 0, 'warnings' => [], 'project_ids' => []];
+            foreach ($names as $nm) {
+                $nm = basename((string)$nm);
+                if (!preg_match('/^[A-Za-z0-9_.\-]+\.pm\.json$/', $nm)) continue;
+                $path = __DIR__ . '/library/' . $nm;
+                $j = is_file($path) ? json_decode((string)file_get_contents($path), true) : null;
+                if (!is_array($j)) continue;
+                if (!empty($j['library_module'])) {
+                    $t = $db->prepare("SELECT COUNT(*) FROM nodes WHERE project_id=? AND parent_id IS NULL AND kind='module' AND title=?");
+                    $t->execute([$lib, $j['library_module']['title'] ?? '']);
+                    if ((int)$t->fetchColumn() > 0 && empty($in['replace'])) { $res['skipped']++; continue; }
+                    $r = pm_import($db, $j, 'update', $lib, $author);
+                    $res['modules']++; $res['warnings'] = array_merge($res['warnings'], $r['warnings']);
+                } elseif (!empty($j['bundled_project'])) {
+                    $r = pm_import($db, $j, 'new', null, $author);
+                    $res['projects']++; $res['project_ids'][] = $r['project_id']; $res['warnings'] = array_merge($res['warnings'], $r['warnings']);
+                }
+            }
+            out($res);
+        }
+
         case 'node_copy':     // src_node_id → dst_project_id / dst_parent_id (+ x,y,title)
             $src = (int)($in['src_node_id'] ?? 0);
             $dstPid = (int)($in['dst_project_id'] ?? 0);
