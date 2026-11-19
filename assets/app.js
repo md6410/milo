@@ -284,7 +284,7 @@ function authView() {
 /* ---------- خانه ---------- */
 function homeView() {
   var cards = S.projects.map(function (p) {
-    return '<div class="card pcard" data-act="open" data-id="' + p.id + '"><h3>🗂️ ' + esc(p.name) + '</h3>' +
+    return '<div class="card pcard" data-act="open" data-id="' + p.id + '"><div class="row" style="flex-wrap:nowrap"><h3 class="grow">🗂️ ' + esc(p.name) + '</h3><button type="button" class="btn sm ghost" title="حذفِ پروژه" data-act="delproject" data-id="' + p.id + '">🗑</button></div>' +
       '<div class="mut sm clamp2" style="min-height:22px" title="' + esc(p.description || '') + '">' + esc(p.description || '') + '</div>' +
       '<div class="row" style="margin:8px 0 4px"><div class="grow">' + bar(p.progress, p.progress >= 100 ? 'ok' : '') + '</div><b>' + FA(p.progress) + '٪</b></div>' +
       '<div class="row sm mut"><span>' + FA(p.node_count) + ' بخش</span><span>·</span><span>' + FA(p.leaf_done) + '/' + FA(p.leaf_count) + ' کار</span><span>·</span><span>⏱ ' + fmtDur(p.work_total) + '</span>' +
@@ -1577,6 +1577,11 @@ var ACTS = {
     modal({ title: 'تنظیمات پروژه', body: projectForm(p, true) + '<div style="margin-top:6px"><button type="button" class="btn danger sm" data-del>حذف کاملِ پروژه</button></div>',
       setup: function (f, close) { $('[data-del]', f).addEventListener('click', guard(function () { if (!confirm('پروژه «' + p.name + '» با همهٔ بخش‌ها، گزارش‌ها و پیوست‌ها برای همیشه پاک شود؟')) return; return api('project_delete', { project_id: S.pid }).then(function () { close(); S.P = null; S.pid = 0; location.hash = '#/'; }); })); },
       onok: function (f) { return saveProjectForm(f, S.pid).then(reload); } });
+  },
+  delproject: function (el) {
+    var id = elId(el), p = S.projects.filter(function (x) { return x.id === id; })[0]; if (!p) return;
+    if (!confirm('پروژهٔ «' + p.name + '» با همهٔ بخش‌ها، تست‌ها، گزارش‌ها و پیوست‌ها برای همیشه پاک شود؟\nاین کار برگشت‌پذیر نیست.')) return;
+    return api('project_delete', { project_id: id }).then(function () { toast('پروژه حذف شد'); return loadProjects().then(function () { render(); }); });
   },
   bundled: function () { return bundledDialog(); },
   sample: function () { toast('در حالِ ساختنِ دمو…'); return runSample().then(function (pid) { S.pid = 0; S.P = null; location.hash = '#/p/' + pid + '/map'; route(); }); },
