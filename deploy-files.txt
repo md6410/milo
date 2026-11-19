@@ -9,5 +9,7 @@ inc/update.php
 inc/version.php
 assets/app.css
 assets/app.js
+assets/canvas.js
+assets/flow.js
 assets/engine.js
 assets/jalali.js

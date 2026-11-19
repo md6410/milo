@@ -2,7 +2,7 @@
 (function () {
 'use strict';
 var J = window.JAL, E = window.ENG;
-var S = { version: '', updAvail: false, user: null, csrf: '', needsSetup: false, projects: [], pid: 0, P: null, idx: null, sch: null,
+var S = { drawerOpen: false, cv: null, cvView: {}, pendingRename: 0, pendingLink: '', version: '', updAvail: false, user: null, csrf: '', needsSetup: false, projects: [], pid: 0, P: null, idx: null, sch: null,
   tab: 'dash', focus: 0, sel: 0, open: {}, zoom: 'week', crit: true, logNode: '', logKind: '' };
 var FA = J.fa;
 var ZOOM = { day: 26, week: 11, month: 4, quarter: 1.6 };
@@ -123,6 +123,7 @@ function tabsBar() {
 }
 function renderContent(keep) {
   var c = $('#content'); if (!c) return;
+  var mn = $('.main'); if (mn) mn.classList.toggle('overlay', S.tab === 'map');
   var sc = {};
   if (keep) { $$('[data-sk]', c).forEach(function (e) { sc[e.getAttribute('data-sk')] = [e.scrollLeft, e.scrollTop]; }); sc.win = window.scrollY; }
   var fn = { dash: dashView, map: mapView, outline: outlineView, plan: planView, gantt: ganttView, logs: logsView, ai: aiView }[S.tab] || dashView;
@@ -130,6 +131,7 @@ function renderContent(keep) {
   if (keep) { $$('[data-sk]', c).forEach(function (e) { var s = sc[e.getAttribute('data-sk')]; if (s) { e.scrollLeft = s[0]; e.scrollTop = s[1]; } }); window.scrollTo(0, sc.win || 0); }
   if (S.tab === 'gantt' && !keep) { var g = $('.gscroll'); if (g && S._gToday != null) g.scrollLeft = Math.max(0, S._gToday - 160); }
   if (S.tab === 'ai') bindAi();
+  if (S.tab === 'map') mountMap();
 }
 function selectNode(id, focusToo) {
   S.sel = id;
@@ -161,7 +163,7 @@ function homeView() {
   }).join('');
   return homeTop() +
     '<div class="wrap"><div class="row" style="margin-bottom:14px"><h2 class="sec grow" style="margin:0">پروژه‌ها</h2>' +
-    '<button class="btn" data-act="sample">پروژهٔ نمونه</button><button class="btn" data-act="importnew">ایمپورت از فایل…</button>' +
+    '<button class="btn" data-act="sample">پروژهٔ دمو (همهٔ امکانات)</button><button class="btn" data-act="importnew">ایمپورت از فایل…</button>' +
     '<button class="btn pri" data-act="newproject">+ پروژهٔ جدید</button></div>' +
     (cards ? '<div class="grid">' + cards + '</div>' : '<div class="card empty">هنوز پروژه‌ای ندارید.<br>با «پروژهٔ جدید» شروع کنید یا «پروژهٔ نمونه» را ببینید.</div>') + '</div>';
 }
@@ -223,18 +225,38 @@ function dashView() {
     (sch.cycle ? '<p class="crit">⚠ در وابستگی‌ها چرخه وجود دارد؛ زمان‌بندی دقیق نیست.</p>' : '');
 }
 
-/* ---------- نقشهٔ ساختار ---------- */
-var CW = 236, CH = 112, GX = 130, GY = 30, PAD = 24;
-function mapView() {
-  var idx = S.idx, sch = S.sch, focus = S.focus;
-  var fchain = focus ? idx.chain(focus) : [];
-  var kids = idx.children(focus);
-  var crumbs = '<a data-act="focus" data-id="0">ریشهٔ پروژه</a>' + fchain.map(function (id) { return '<span class="mut">›</span><a data-act="focus" data-id="' + id + '">' + esc(idx.byId.get(id).title) + '</a>'; }).join('');
-  var head = '<div class="crumbs">' + crumbs + '<span class="grow"></span>' + (focus ? '<button class="btn sm" data-act="pick" data-id="' + focus + '">جزئیاتِ این بخش</button>' : '') +
-    '<button class="btn sm pri" data-act="addnode" data-parent="' + focus + '">+ افزودن زیربخش اینجا</button></div>';
-  if (!kids.length) {
-    return head + '<div class="card empty">' + (focus ? 'این بخش زیرمجموعه ندارد.' : 'پروژه خالی است.') + '<br>با «افزودن زیربخش» بخش تازه بسازید.</div>';
-  }
+/* ---------- نقشهٔ ساختار (بومِ گرافیکی) ---------- */
+var CW = 232, CH = 118, KCOL = { section: '#64748b', module: '#7a5af8', task: '#e0912b' };
+var ICONS = ['📦', '🧩', '⚙️', '🔐', '👤', '🛒', '💳', '📊', '🗄️', '🌐', '📱', '🔔', '📧', '🔍', '🧪', '🚀', '🎨', '📝', '🔗', '⭐'];
+function nodeColor(n) { return n.color || KCOL[n.kind]; }
+function blockHtml(n, v, ghost) {
+  var idx = S.idx, kc = idx.children(n.id).length, st = v.status || n.status, pr = v.progress != null ? v.progress : n.progress, meta = [];
+  if (kc) meta.push('▸ ' + FA(kc) + ' زیربخش');
+  if ((n.inputs || []).length) meta.push('⇢ ' + FA(n.inputs.length));
+  if ((n.outputs || []).length) meta.push('⇠ ' + FA(n.outputs.length));
+  if (n.flow && n.flow.nodes && n.flow.nodes.length) meta.push('⎇ فلوچارت');
+  return '<div class="bk st-' + st + '"><div class="bk-h"><span class="bk-i">' + esc(n.icon || (n.kind === 'task' ? '✔️' : n.kind === 'module' ? '🧩' : '📁')) + '</span><span class="bk-k">' + E.KIND[n.kind] + (ghost ? ' · بیرونی' : '') + '</span><span class="bk-s">' + (v.crit && S.crit ? '<b class="crit">بحرانی</b> ' : '') + E.STATUS[st] + '</span></div>' +
+    '<div class="bk-t">' + esc(n.title) + '</div><div class="bk-m">' + (meta.join(' · ') || esc((n.summary || '').slice(0, 44)) || '&nbsp;') + '</div>' +
+    '<div class="bk-p"><i style="width:' + pr + '%"></i></div><span class="bk-n">' + FA(pr) + '٪</span></div>';
+}
+/* چیدمانِ لایه‌ای (پیش‌نیازها راست، پس‌نیازها چپ) برای بلوک‌هایی که هنوز جایگاهِ ثبت‌شده ندارند */
+function autoLayout(kids, edges) {
+  var preds = {}; kids.forEach(function (k) { preds[k] = []; });
+  edges.forEach(function (e) { if (preds[e.b] && preds[e.a]) preds[e.b].push(e.a); });
+  var layer = {}, vis = {};
+  function lay(n) { if (layer[n] != null) return layer[n]; if (vis[n]) return 0; vis[n] = 1; var m = 0; preds[n].forEach(function (p) { m = Math.max(m, lay(p) + 1); }); vis[n] = 0; layer[n] = m; return m; }
+  kids.forEach(lay);
+  var cols = {}; kids.forEach(function (k) { (cols[layer[k]] = cols[layer[k]] || []).push(k); });
+  var pos = {}, GX = 110, GY = 36, tall = 0; Object.keys(cols).forEach(function (c) { tall = Math.max(tall, cols[c].length); });
+  var H = tall * CH + (tall - 1) * GY;
+  Object.keys(cols).forEach(function (c) {
+    var list = cols[c], h = list.length * CH + (list.length - 1) * GY, y0 = (H - h) / 2;
+    list.forEach(function (k, i) { pos[k] = { x: -c * (CW + GX), y: y0 + i * (CH + GY) }; });
+  });
+  return pos;
+}
+function mapModel(forceAuto) {
+  var idx = S.idx, sch = S.sch, focus = S.focus, fchain = focus ? idx.chain(focus) : [], kids = idx.children(focus);
   function resolve(e) {
     var ch = idx.chain(e);
     if (focus) {
@@ -244,62 +266,111 @@ function mapView() {
     }
     return { card: ch[0] };
   }
-  var edges = {}, ginIds = {}, goutIds = {}, ghosts = {};
+  var edges = {}, ghosts = {};
   S.P.deps.forEach(function (d) {
     if (!idx.byId.has(d.from_id) || !idx.byId.has(d.to_id)) return;
-    var a = resolve(d.from_id), b = resolve(d.to_id);
-    if (!a || !b) return;
-    var A, B;
+    var a = resolve(d.from_id), b = resolve(d.to_id); if (!a || !b) return;
+    var A, B, ea = a.card || a.ghost, eb = b.card || b.ghost;
     if (a.card && b.card) { if (a.card === b.card) return; A = String(a.card); B = String(b.card); }
-    else if (a.ghost && b.card) { A = 'g' + a.ghost; B = String(b.card); ghosts[a.ghost] = 1; ginIds[a.ghost] = 1; }
-    else if (a.card && b.ghost) { A = String(a.card); B = 'g' + b.ghost; ghosts[b.ghost] = 1; goutIds[b.ghost] = 1; }
+    else if (a.ghost && b.card) { A = 'g' + a.ghost; B = String(b.card); ghosts[a.ghost] = 'in'; }
+    else if (a.card && b.ghost) { A = String(a.card); B = 'g' + b.ghost; ghosts[b.ghost] = ghosts[b.ghost] || 'out'; }
     else return;
-    var k = A + '>' + B; edges[k] = edges[k] || { a: A, b: B, labels: [] };
-    if (d.label && edges[k].labels.indexOf(d.label) < 0) edges[k].labels.push(d.label);
+    var k = A + '>' + B, e = edges[k] = edges[k] || { a: A, b: B, labels: [], real: null, src: ea };
+    if (ea === d.from_id && eb === d.to_id) e.real = d; else if (d.label && e.labels.indexOf(d.label) < 0) e.labels.push(d.label);
   });
-  var nodes = kids.map(String).concat(Object.keys(ghosts).map(function (g) { return 'g' + g; }));
-  var preds = {}; nodes.forEach(function (n) { preds[n] = []; });
-  Object.keys(edges).forEach(function (k) { var e = edges[k]; if (e.a.charAt(0) !== 'g' && e.b.charAt(0) !== 'g') preds[e.b].push(e.a); });
-  var layer = {}, vis = {};
-  function lay(n) { if (layer[n] != null) return layer[n]; if (vis[n]) return 0; vis[n] = 1; var m = 0; preds[n].forEach(function (p) { m = Math.max(m, lay(p) + 1); }); vis[n] = 0; layer[n] = m; return m; }
-  kids.forEach(function (k) { lay(String(k)); });
-  var hasIn = Object.keys(ginIds).length > 0, maxL = 0;
-  kids.forEach(function (k) { layer[String(k)] += hasIn ? 1 : 0; maxL = Math.max(maxL, layer[String(k)]); });
-  Object.keys(ghosts).forEach(function (g) { layer['g' + g] = ginIds[g] ? 0 : maxL + 1; });
-  var cols = {}; nodes.forEach(function (n) { (cols[layer[n]] = cols[layer[n]] || []).push(n); });
-  var nl = Math.max.apply(null, Object.keys(cols).map(Number)) + 1;
-  var tallest = 0; Object.keys(cols).forEach(function (c) { tallest = Math.max(tallest, cols[c].length); });
-  var H = PAD * 2 + tallest * CH + (tallest - 1) * GY + 20, W = PAD * 2 + nl * CW + (nl - 1) * GX;
-  var pos = {};
-  Object.keys(cols).forEach(function (c) {
-    var list = cols[c], h = list.length * CH + (list.length - 1) * GY, y0 = PAD + (H - 20 - PAD * 2 - h) / 2;
-    list.forEach(function (n, i) { pos[n] = { x: W - PAD - CW - c * (CW + GX), y: y0 + i * (CH + GY) }; });
+  var kidIds = kids.map(String), auto = autoLayout(kidIds, Object.keys(edges).map(function (k) { return edges[k]; }));
+  var items = [], minx = 1e9, maxx = -1e9, miny = 1e9;
+  kids.forEach(function (id) {
+    var n = idx.byId.get(id), v = sch.info.get(id) || {}, a = auto[String(id)];
+    var x = n.x != null && !forceAuto ? n.x : a.x, y = n.y != null && !forceAuto ? n.y : a.y;
+    minx = Math.min(minx, x); maxx = Math.max(maxx, x + CW); miny = Math.min(miny, y);
+    items.push({ id: String(id), x: x, y: y, w: CW, h: CH, shape: 'card', color: nodeColor(n), html: blockHtml(n, v), text: n.title, node: n });
   });
-  var svg = '<svg width="' + W + '" height="' + H + '"><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs><g color="#7d88a3">';
-  Object.keys(edges).forEach(function (k) {
-    var e = edges[k], A = pos[e.a], B = pos[e.b]; if (!A || !B) return;
-    var x1 = A.x, y1 = A.y + CH / 2, x2 = B.x + CW, y2 = B.y + CH / 2, d;
-    if (x2 < x1) { var c = Math.max(40, (x1 - x2) / 2); d = 'M' + x1 + ' ' + y1 + ' C' + (x1 - c) + ' ' + y1 + ' ' + (x2 + c) + ' ' + y2 + ' ' + x2 + ' ' + y2; }
-    else { var yy = Math.max(A.y, B.y) + CH + 14; d = 'M' + x1 + ' ' + y1 + ' C' + (x1 - 50) + ' ' + y1 + ' ' + (x1 - 50) + ' ' + yy + ' ' + (x1 + 10) + ' ' + yy + ' L' + (x2 - 10) + ' ' + yy + ' C' + (x2 + 50) + ' ' + yy + ' ' + (x2 + 50) + ' ' + y2 + ' ' + x2 + ' ' + y2; }
-    svg += '<path class="edge" d="' + d + '" marker-end="url(#ah)"/>';
-    if (e.labels.length) { var lt = e.labels.join('، '); if (lt.length > 20) lt = lt.slice(0, 19) + '…'; svg += '<text class="elabel" text-anchor="middle" x="' + ((x1 + x2) / 2) + '" y="' + (((y1 + y2) / 2) - 6) + '">' + esc(lt) + '</text>'; }
+  var gi = 0, go = 0;
+  Object.keys(ghosts).forEach(function (g) {
+    var n = idx.byId.get(+g), v = sch.info.get(+g) || {}, inn = ghosts[g] === 'in';
+    items.push({ id: 'g' + g, x: inn ? maxx + 120 : minx - CW - 120, y: miny + (inn ? gi++ : go++) * (CH + 30), w: CW, h: CH, shape: 'card', color: nodeColor(n), html: blockHtml(n, v, true), text: n.title, ghost: true, node: n });
   });
-  svg += '</g></svg>';
-  var cardsH = nodes.map(function (n) {
-    var P = pos[n], isG = n.charAt(0) === 'g', id = isG ? +n.slice(1) : +n, node = idx.byId.get(id), v = sch.info.get(id) || {};
-    var kc = idx.children(id).length, st = v.status || node.status, meta = [];
-    if (kc) meta.push('▸ ' + FA(kc) + ' زیربخش');
-    if ((node.inputs || []).length) meta.push('⇢ ' + FA(node.inputs.length) + ' ورودی');
-    if ((node.outputs || []).length) meta.push('⇠ ' + FA(node.outputs.length) + ' خروجی');
-    var tip = node.title + (node.summary ? '\n' + node.summary : '') + (isG ? '\n(بیرون از این سطح: ' + idx.pathText(id) + ')' : '');
-    var pr = v.progress != null ? v.progress : node.progress;
-    return '<div class="mcard k-' + node.kind + ' st-' + st + (isG ? ' ghost' : '') + (S.sel === id ? ' sel' : '') + '" style="left:' + P.x + 'px;top:' + P.y + 'px;width:' + CW + 'px;height:' + CH + 'px" data-act="' + (isG ? 'ghostgo' : 'cardgo') + '" data-id="' + id + '" title="' + esc(tip) + '">' +
-      '<div class="kb"><span>' + E.KIND[node.kind] + (isG ? ' · بیرونی' : '') + '</span><span>' + (v.crit && S.crit ? '<b class="crit">بحرانی</b> ' : '') + E.STATUS[st] + '</span></div>' +
-      '<div class="mt">' + esc(node.title) + '</div><div class="mm">' + (meta.join(' · ') || esc((node.summary || '').slice(0, 40)) || '&nbsp;') + '</div>' +
-      '<div class="row" style="gap:6px;flex-wrap:nowrap"><div class="grow">' + bar(pr) + '</div><span class="sm">' + FA(pr) + '٪</span></div></div>';
-  }).join('');
-  return head + '<div class="mapbox" data-sk="map"><div class="mapin" style="width:' + W + 'px;height:' + H + 'px">' + svg + cardsH + '</div></div>' +
-    '<p class="mut sm">روی هر کارت کلیک کنید تا زیرمجموعه‌اش باز شود و جزئیاتش کنار صفحه بیاید. پیکان‌ها = وابستگی (برچسبِ روی پیکان = چه چیزی منتقل می‌شود). کارت‌های خط‌چین = بخش‌های بیرون از این سطح که به این‌ها وصل‌اند.</p>';
+  var links = Object.keys(edges).map(function (k) {
+    var e = edges[k], sn = idx.byId.get(e.src), col = sn ? nodeColor(sn) : null;
+    return e.real ? { id: 'd' + e.real.id, from: e.a, to: e.b, label: e.real.label || '', color: col, dep: e.real }
+      : { id: 'a' + k, from: e.a, to: e.b, label: e.labels.join('، '), color: col, dashed: true, locked: true };
+  });
+  return { items: items, links: links, kids: kids };
+}
+function mapView() {
+  var idx = S.idx, focus = S.focus, fchain = focus ? idx.chain(focus) : [];
+  var crumbs = '<a data-act="focus" data-id="0">ریشهٔ پروژه</a>' + fchain.map(function (id) { return '<span class="mut">›</span><a data-act="focus" data-id="' + id + '">' + esc(idx.byId.get(id).title) + '</a>'; }).join('');
+  var tools = '<div class="mtools"><button class="btn sm pri" data-act="mapadd" data-kind="module">＋ ماژول</button><button class="btn sm" data-act="mapadd" data-kind="section">＋ بخش کلی</button><button class="btn sm" data-act="mapadd" data-kind="task">＋ کار/جزئیات</button>' +
+    '<span class="grow"></span><button class="btn sm" data-act="maplayout" title="چیدمانِ خودکار بر پایهٔ وابستگی">✨ چیدمان خودکار</button><button class="btn sm" data-act="mapzoom" data-v="out">－</button><button class="btn sm" data-act="mapzoom" data-v="fit">جا بده</button><button class="btn sm" data-act="mapzoom" data-v="in">＋</button>' +
+    (focus ? '<button class="btn sm" data-act="pick" data-id="' + focus + '">جزئیاتِ این بخش</button>' : '') + '</div>';
+  var tip = idx.children(focus).length ? '' : '<div class="cv-hint">بومِ خالی است.<br>روی بوم <b>دوبار کلیک</b> کنید یا از نوارِ بالا یک بلوک اضافه کنید.</div>';
+  return '<div class="crumbs">' + crumbs + '</div>' + tools + '<div class="cvwrap"><div id="cvhost" class="cvhost"></div>' + tip + '</div>' +
+    '<p class="mut sm">دوبار کلیک روی بوم = بلوکِ تازه · دوبار کلیک روی بلوک = بازکردنِ زیرمجموعه · از نقطه‌های کنارِ بلوک بکشید و روی بلوکِ دیگر رها کنید = پیوند (روی جای خالی رها کنید = بلوکِ تازهٔ متصل) · کلیک روی بلوک/پیکان = رنگ و ابزار · ' +
+    'خط‌چین‌ها = وابستگیِ بین زیرمجموعه‌ها یا بخش‌های بیرون از این سطح · چرخ ماوس = زوم، کشیدنِ پس‌زمینه = جابه‌جایی، Shift+کشیدن = انتخابِ چندتایی.</p>';
+}
+function rawId(id) { return +String(id).replace(/^g/, ''); }
+function createBlock(pt, kind, srcId) {
+  var parent = S.focus || null;
+  return api('node_save', { project_id: S.pid, title: 'بلوک جدید', kind: kind || (S.focus && S.idx.byId.get(S.focus).kind === 'section' ? 'module' : (S.focus ? 'task' : 'module')),
+    parent_id: parent, x: Math.round(pt.x - CW / 2), y: Math.round(pt.y - CH / 2) }).then(function (r) {
+    var p = srcId ? api('dep_save', { project_id: S.pid, from_id: srcId, to_id: r.id, label: '' }) : Promise.resolve();
+    return p.then(function () { S.sel = r.id; S.pendingRename = r.id; return reload(); });
+  });
+}
+function mountMap() {
+  var host = $('#cvhost'); if (!host) return;
+  var key = String(S.focus), m = mapModel(), fresh = !S.cvView[key];
+  var cv = S.cv = PMCanvas.create(host, { id: 'map', view: S.cvView[key],
+    onView: function (v) { S.cvView[key] = v; },
+    onSelect: function (it, lk) { var id = it ? rawId(it.id) : 0; if (id !== S.sel && !lk) { S.sel = id; if (!id) S.drawerOpen = false; renderDrawer(); } },
+    onMove: function (list) {
+      var items = list.map(function (x) { var n = S.idx.byId.get(+x.id); if (n) { n.x = x.x; n.y = x.y; } return { id: +x.id, x: x.x, y: x.y }; });
+      api('nodes_bulk', { project_id: S.pid, items: items }).catch(fail);
+    },
+    onAdd: guard(function (pt) { return createBlock(pt); }),
+    onConnectNew: guard(function (src, pt) { return createBlock(pt, null, rawId(src.id)); }),
+    onConnect: guard(function (a, b) {
+      var f = rawId(a.id), t = rawId(b.id);
+      return api('dep_save', { project_id: S.pid, from_id: f, to_id: t, label: '' }).then(function () { return loadProject(S.pid); }).then(function () {
+        var d = S.P.deps.filter(function (x) { return x.from_id === f && x.to_id === t; })[0]; if (d) S.pendingLink = 'd' + d.id; render(true);
+      });
+    }),
+    onRename: guard(function (it, text) { text = (text || '').trim(); if (!text || text === it.node.title) return; return api('node_save', { project_id: S.pid, id: rawId(it.id), title: text }).then(reload); }),
+    onColor: guard(function (it, c) { var n = it.node; n.color = c; var p = api('node_save', { project_id: S.pid, id: n.id, color: c || '' }); S.cv.setData(mapModel().items, mapModel().links, true); return p; }),
+    onDelete: guard(function (ids) {
+      if (!ids.length) return;
+      var extra = 0; ids.forEach(function (i) { extra += S.idx.descendants(rawId(i)).length; });
+      if (!confirm(FA(ids.length) + ' بلوک' + (extra ? ' و ' + FA(extra) + ' زیرمجموعه‌شان' : '') + ' (با گزارش‌ها و پیوست‌ها) پاک شود؟')) return;
+      return Promise.all(ids.map(function (i) { return api('node_delete', { project_id: S.pid, id: rawId(i) }); })).then(function () { S.sel = 0; return reload(); });
+    }),
+    onOpen: function (it) { var id = rawId(it.id); S.sel = id; S.focus = it.ghost ? S.idx.parentOf(id) : id; renderContent(); renderDrawer(); },
+    onLinkLabel: guard(function (l, text) { if (!l.dep) return; return api('dep_save', { project_id: S.pid, from_id: l.dep.from_id, to_id: l.dep.to_id, label: text }).then(reload); }),
+    onLinkDelete: guard(function (l) { if (!l.dep) return; return api('dep_delete', { project_id: S.pid, id: l.dep.id }).then(reload); }),
+    onLinkReverse: guard(function (l) { var d = l.dep; if (!d) return; return api('dep_delete', { project_id: S.pid, id: d.id }).then(function () { return api('dep_save', { project_id: S.pid, from_id: d.to_id, to_id: d.from_id, label: d.label }); }).then(reload); }),
+    itemActions: function (it) {
+      var id = rawId(it.id);
+      return [{ icon: '📝', title: 'جزئیات و ویرایش', fn: function () { S.sel = id; S.drawerOpen = true; renderDrawer(); } },
+        { icon: '⤵', title: 'باز کردنِ زیرمجموعه', fn: function () { S.sel = id; S.focus = id; renderContent(); renderDrawer(); } },
+        { icon: '＋', title: 'زیربخش داخلِ این بلوک', fn: function () { addNodeDialog(id); } },
+        { icon: '🙂', title: 'آیکن', fn: function () { iconDialog(id); } },
+        { icon: '⎇', title: 'فلوچارت', fn: function () { ACTS.flowedit(null, null, id); } }];
+    } });
+  cv.setData(m.items, m.links);
+  if (fresh) cv.fit();
+  var sid = S.pendingRename || S.sel;
+  if (sid && m.items.some(function (i) { return i.id === String(sid); })) cv.select([String(sid)]);
+  if (S.pendingRename) { var pr = S.pendingRename; S.pendingRename = 0; setTimeout(function () { cv.edit(String(pr)); }, 60); }
+  if (S.pendingLink) { var pl = S.pendingLink; S.pendingLink = ''; cv.select([], pl); setTimeout(function () { cv.editLabel(pl); }, 60); }
+}
+function iconDialog(id) {
+  var n = S.idx.byId.get(id);
+  modal({ title: 'آیکنِ بلوک', noOk: true, body: '<div class="icons">' + ICONS.map(function (e) { return '<button type="button" class="btn ic" data-e="' + e + '">' + e + '</button>'; }).join('') + '<button type="button" class="btn ic" data-e="">∅</button></div><label class="f"><span>یا خودتان بنویسید (یک ایموجی)</span><input name="own" maxlength="4"></label>',
+    setup: function (f, close) {
+      function set(e) { return api('node_save', { project_id: S.pid, id: id, icon: e }).then(function () { close(); return reload(); }).catch(fail); }
+      $$('.ic', f).forEach(function (b) { b.addEventListener('click', function () { set(b.getAttribute('data-e')); }); });
+      $('[name=own]', f).addEventListener('change', function (e) { set(e.target.value.trim()); });
+    } });
 }
 
 /* ---------- فهرست ---------- */
@@ -576,7 +647,7 @@ function depBlock(id, dir) { // dir: 'in' پیش‌نیازها  |  'out' پس�
 }
 function renderDrawer() {
   var d = $('#drawer'); if (!d) return;
-  if (!S.sel || !S.idx.byId.has(S.sel)) { d.className = 'hidden'; d.innerHTML = ''; return; }
+  if (!S.sel || !S.idx.byId.has(S.sel) || (S.tab === 'map' && !S.drawerOpen)) { d.className = 'hidden'; d.innerHTML = ''; return; }
   var keepTop = d.scrollTop, idx = S.idx, n = idx.byId.get(S.sel), id = n.id, v = S.sch.info.get(id) || {}, leaf = idx.isLeaf(id);
   var nlogs = S.P.logs.filter(function (l) { return l.node_id === id; });
   var nfiles = S.P.files.filter(function (f) { return f.node_id === id && !f.log_id; });
@@ -599,6 +670,11 @@ function renderDrawer() {
     '<div class="sub"><h4>ورودی‌ها</h4><div id="io-in">' + ioRows('in', n.inputs) + '</div><button type="button" class="btn sm" data-act="addio" data-k="in">＋ ورودی</button></div>' +
     '<div class="sub"><h4>خروجی‌ها</h4><div id="io-out">' + ioRows('out', n.outputs) + '</div><button type="button" class="btn sm" data-act="addio" data-k="out">＋ خروجی</button></div>' +
     '<label class="f"><span>پردازش (این ماژول با ورودی‌ها چه می‌کند؟)</span><textarea name="process">' + esc(n.process) + '</textarea></label>' +
+    '<div class="sub"><h4>فلوچارت (توضیحِ گرافیکیِ پردازش)</h4>' + (n.flow && n.flow.nodes && n.flow.nodes.length ?
+      '<div class="flthumb" data-act="flowedit" data-id="' + id + '" title="برای ویرایش کلیک کنید">' + FLOW.svg(n.flow, { width: '100%', height: 'auto', ink: 'currentColor' }) + '</div><div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">ویرایشِ فلوچارت</button><button type="button" class="btn sm danger" data-act="flowdel" data-id="' + id + '">حذف</button></div>' :
+      '<button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">＋ رسمِ فلوچارت</button>') + '</div>' +
+    '<div class="row"><div class="f grow"><span class="mut sm" style="display:block">رنگ</span><span class="cv-dots" id="colpick">' + window.PMCanvas.PALETTE.map(function (c) { return '<i class="cv-dot' + (n.color === c ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '"></i>'; }).join('') + '<i class="cv-dot none' + (!n.color ? ' on' : '') + '" data-c="">∅</i></span><input type="hidden" name="color" value="' + esc(n.color || '') + '"></div>' +
+    '<label class="f" style="width:90px"><span>آیکن</span><input name="icon" value="' + esc(n.icon || '') + '" maxlength="4"></label></div>' +
     '<label class="f"><span>نکات فنی (فناوری، جدول‌ها، API، فایل‌ها…)</span><textarea name="tech">' + esc(n.tech) + '</textarea></label>' +
     (leaf ? '<div class="row"><label class="f grow"><span>برآورد (روز)</span><input type="number" step="0.5" min="0" name="est_days" value="' + (n.est_days == null ? '' : n.est_days) + '" placeholder="پیشنهاد: ' + FA(E.heuristic(n)) + '"></label>' +
       '<label class="f grow"><span>زمان نهایی (روز) — دستی</span><input type="number" step="0.5" min="0" name="final_days" value="' + (n.final_days == null ? '' : n.final_days) + '"></label></div>' +
@@ -616,6 +692,8 @@ function collectNode(f) {
   var o = {};
   ['title', 'kind', 'summary', 'details', 'process', 'tech', 'assignee', 'tags'].forEach(function (k) { var e = $('[name=' + k + ']', f); if (e) o[k] = e.value; });
   o.priority = +$('[name=priority]', f).value;
+  var cl = $('[name=color]', f); if (cl) o.color = cl.value || '';
+  var ic = $('[name=icon]', f); if (ic) o.icon = ic.value.trim();
   var pr = $('[name=parent_id]', f); o.parent_id = pr.value ? +pr.value : null;
   var st = $('[name=status]', f), pg = $('[name=progress]', f);
   if (pg) {
@@ -658,30 +736,75 @@ function msDialog(m) {
 }
 
 /* ---------- پروژهٔ نمونه ---------- */
-function sampleDoc() {
-  var N = function (id, parent, kind, title, summary, ins, outs, process, est) {
-    return { id: id, parent: parent, kind: kind, title: title, summary: summary, inputs: (ins || []).map(function (x) { return { name: x }; }), outputs: (outs || []).map(function (x) { return { name: x }; }), process: process || '', est_days: est || null };
-  };
-  return { project: { name: 'نمونه: فروشگاه اینترنتی بزرگ', description: 'پروژهٔ نمونه برای آشنایی با ابزار؛ هر زمان خواستید حذفش کنید.', start_date: J.dayToIso(J.today()), target_date: J.dayToIso(J.today() + 75),
-      ai_brief: 'PHP 8 + MySQL روی cPanel؛ رابط فارسی و راست‌به‌چپ؛ بدون وابستگیِ سنگین.' },
-    nodes: [
-      N('a', null, 'section', 'هسته و زیرساخت', 'پایگاه‌داده، احراز هویت و تنظیمات'),
-      N('a1', 'a', 'module', 'طراحی پایگاه‌داده', 'جدول‌ها و رابطه‌ها', ['فهرست موجودیت‌ها'], ['اسکیمای SQL'], 'مدل‌سازی و ساخت مهاجرت‌ها', 3),
-      N('a2', 'a', 'module', 'کاربران و ورود', 'ثبت‌نام، ورود، نقش‌ها', ['اسکیمای SQL'], ['نشست کاربر', 'سطح دسترسی'], 'اعتبارسنجی و ساخت نشست امن', 4),
-      N('b', null, 'section', 'کاتالوگ', 'محصولات و دسته‌بندی'),
-      N('b1', 'b', 'module', 'مدیریت محصول', 'ساخت/ویرایش محصول و تصاویر', ['اسکیمای SQL', 'سطح دسترسی'], ['فهرست محصولات'], '', 5),
-      N('b2', 'b', 'module', 'جست‌وجو و فیلتر', 'جست‌وجوی سریع', ['فهرست محصولات'], ['نتایج مرتب'], 'نمایه‌سازی و رتبه‌بندی', 4),
-      N('c', null, 'section', 'خرید', 'سبد، پرداخت و سفارش'),
-      N('c1', 'c', 'module', 'سبد خرید', 'افزودن/حذف کالا', ['فهرست محصولات', 'نشست کاربر'], ['اقلام سبد'], '', 3),
-      N('c2', 'c', 'module', 'پرداخت آنلاین', 'اتصال به درگاه', ['اقلام سبد'], ['وضعیت پرداخت'], 'ساخت تراکنش، بازگشت از درگاه، تأیید', 6),
-      N('c3', 'c', 'module', 'ثبت و پیگیری سفارش', 'چرخهٔ سفارش', ['وضعیت پرداخت', 'اقلام سبد'], ['سفارش', 'پیامک وضعیت'], '', 5),
-      N('d', null, 'module', 'پنل مدیریت', 'گزارش و مدیریت', ['سفارش', 'فهرست محصولات'], ['گزارش فروش'], '', 8)],
-    dependencies: [{ from: 'a1', to: 'a2', label: 'اسکیمای SQL' }, { from: 'a1', to: 'b1', label: 'اسکیمای SQL' }, { from: 'a2', to: 'b1', label: 'سطح دسترسی' },
-      { from: 'b1', to: 'b2', label: 'فهرست محصولات' }, { from: 'b1', to: 'c1', label: 'فهرست محصولات' }, { from: 'a2', to: 'c1', label: 'نشست کاربر' },
-      { from: 'c1', to: 'c2', label: 'اقلام سبد' }, { from: 'c2', to: 'c3', label: 'وضعیت پرداخت' }, { from: 'c', to: 'd', label: 'سفارش‌ها' }, { from: 'b', to: 'd', label: 'محصولات' }],
-    milestones: [{ title: 'نسخهٔ آزمایشی', date: J.dayToIso(J.today() + 40) }, { title: 'انتشار', date: J.dayToIso(J.today() + 75) }] };
+function demoImage() {
+  return new Promise(function (res) {
+    try {
+      var c = document.createElement('canvas'); c.width = 640; c.height = 300; var g = c.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, 640, 300); g.font = '14px sans-serif'; g.textAlign = 'center';
+      var bx = [['users', 40, 40, '#7a5af8'], ['products', 260, 40, '#2f6fed'], ['orders', 480, 40, '#e0912b'], ['order_items', 370, 190, '#1f9d63'], ['payments', 150, 190, '#d64545']];
+      g.strokeStyle = '#7d88a3'; g.lineWidth = 2;
+      [[0, 2], [1, 3], [2, 3], [2, 4], [0, 4]].forEach(function (l) { g.beginPath(); g.moveTo(bx[l[0]][1] + 60, bx[l[0]][2] + 25); g.lineTo(bx[l[1]][1] + 60, bx[l[1]][2] + 25); g.stroke(); });
+      bx.forEach(function (b) { g.fillStyle = '#fff'; g.fillRect(b[1], b[2], 120, 50); g.strokeStyle = b[3]; g.lineWidth = 3; g.strokeRect(b[1], b[2], 120, 50); g.fillStyle = '#1c2333'; g.fillText(b[0], b[1] + 60, b[2] + 30); });
+      c.toBlob(function (b) { res(b); }, 'image/png');
+    } catch (e) { res(null); }
+  });
 }
-
+function sampleDoc() {
+  var T = J.today(), D = function (n) { return J.dayToIso(T + n); };
+  function N(id, parent, kind, title, o) {
+    o = o || {};
+    var n = { id: id, parent: parent, kind: kind, title: title };
+    for (var k in o) n[k] = o[k];
+    if (o.ins) { n.inputs = o.ins.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.ins; }
+    if (o.outs) { n.outputs = o.outs.map(function (x) { return { name: x[0], desc: x[1] || '' }; }); delete n.outs; }
+    return n;
+  }
+  function F(nodes, edges) {
+    return { v: 1, nodes: nodes.map(function (a) { return { id: a[0], type: a[1], text: a[2], x: a[3], y: a[4], w: a[5] || (a[1] === 'decision' ? 180 : a[1] === 'start' || a[1] === 'end' ? 140 : 170), h: a[6] || (a[1] === 'decision' ? 104 : a[1] === 'start' || a[1] === 'end' ? 52 : 64), color: null }; }),
+      edges: edges.map(function (e, i) { return { id: 'e' + (i + 1), from: e[0], to: e[1], label: e[2] || '', color: null }; }) };
+  }
+  var loginFlow = F([['s', 'start', 'شروع', 200, 0], ['i', 'io', 'دریافتِ ایمیل و رمز', 185, 100], ['c', 'process', 'یافتنِ کاربر در پایگاه‌داده', 185, 205], ['d', 'decision', 'رمز درست است؟', 180, 315],
+    ['ok', 'process', 'ساختِ نشست و ثبتِ ورود', 470, 335], ['bad', 'process', 'شمارشِ تلاشِ ناموفق', -90, 335], ['lim', 'decision', 'بیش از ۵ بار؟', -95, 450], ['lock', 'process', 'قفلِ موقتِ حساب', -95, 580], ['e', 'end', 'پایان', 490, 460]],
+    [['s', 'i'], ['i', 'c'], ['c', 'd'], ['d', 'ok', 'بله'], ['d', 'bad', 'خیر'], ['bad', 'lim'], ['lim', 'lock', 'بله'], ['lim', 'i', 'خیر'], ['ok', 'e']]);
+  var payFlow = F([['s', 'start', 'سبدِ تأییدشده', 220, 0], ['t', 'sub', 'ساختِ تراکنش', 205, 100], ['db', 'db', 'ذخیرهٔ تراکنش', 480, 90, 130, 84], ['g', 'process', 'هدایت به درگاه', 205, 205], ['u', 'io', 'بازگشت از درگاه', 200, 310], ['v', 'decision', 'پرداخت موفق؟', 200, 410, 180, 104],
+    ['ok', 'process', 'ثبت سفارش و پیامک', 480, 430], ['no', 'process', 'نمایشِ خطا و تلاشِ دوباره', -80, 430], ['n', 'note', 'تأییدِ نهایی حتماً با فراخوانیِ verify سمتِ سرور', 480, 540, 200, 90], ['e', 'end', 'پایان', 495, 660]],
+    [['s', 't'], ['t', 'db'], ['t', 'g'], ['g', 'u'], ['u', 'v'], ['v', 'ok', 'بله'], ['v', 'no', 'خیر'], ['ok', 'e'], ['n', 'ok']]);
+  var nodes = [
+    N('a', null, 'section', 'هسته و زیرساخت', { icon: '🏗️', color: '#64748b', x: 560, y: 190, summary: 'پایگاه‌داده، کاربران و دسترسی‌ها' }),
+    N('a1', 'a', 'module', 'طراحیِ پایگاه‌داده', { icon: '🗄️', color: '#2f6fed', x: 330, y: 40, summary: 'جدول‌ها، رابطه‌ها و مهاجرت‌ها', status: 'done', progress: 100, final_days: 3, start_date: D(-12), assignee: 'سارا', tags: 'پایگاه‌داده',
+      ins: [['فهرست موجودیت‌ها', 'کاربر، محصول، سفارش…']], outs: [['اسکیمای SQL', 'فایلِ مهاجرت']], process: 'مدل‌سازی ER، نرمال‌سازی تا ۳NF، ساختِ مهاجرت‌ها و دادهٔ اولیه.',
+      details: 'همهٔ جدول‌ها کلیدِ اصلی عددی دارند. حذفِ نرم (soft delete) برای سفارش و محصول.', tech: 'MySQL 8 · utf8mb4 · ایندکس روی slug و created_at' }),
+    N('a2', 'a', 'module', 'کاربران و ورود', { icon: '🔐', color: '#7a5af8', x: 40, y: 40, summary: 'ثبت‌نام، ورود، بازیابیِ رمز', status: 'doing', progress: 60, est_days: 4, final_days: 5, start_date: D(-9), assignee: 'علی', priority: 1,
+      ins: [['اسکیمای SQL'], ['ایمیل و رمز', 'از فرم ورود']], outs: [['نشست کاربر', 'کوکیِ امن'], ['سطح دسترسی', 'نقش‌های کاربر']], process: 'اعتبارسنجی، مقایسهٔ هشِ رمز، ساختِ نشست و محدودیتِ تلاش.',
+      details: 'رمزها با bcrypt هش می‌شوند. پس از ۵ تلاشِ ناموفق حساب ۱۵ دقیقه قفل می‌شود.', tech: 'password_hash · نشستِ HttpOnly · CSRF', flow: loginFlow }),
+    N('a3', 'a', 'task', 'نقش‌ها و مجوزها', { icon: '🛡️', color: '#e0558a', x: 40, y: 240, summary: 'مدیر، کارمند، مشتری', status: 'todo', est_days: 2, ins: [['سطح دسترسی']], outs: [['قواعدِ مجوز']] }),
+    N('b', null, 'section', 'کاتالوگ', { icon: '🛍️', color: '#1f9d63', x: 270, y: 20, summary: 'محصولات و جست‌وجو' }),
+    N('b1', 'b', 'module', 'مدیریتِ محصول', { icon: '📦', x: 40, y: 60, summary: 'ساخت و ویرایشِ محصول با تصویر', status: 'review', progress: 90, est_days: 5, final_days: 6, assignee: 'مریم', tags: 'پنل',
+      ins: [['اسکیمای SQL'], ['سطح دسترسی']], outs: [['فهرست محصولات']], process: 'فرمِ محصول، آپلودِ تصویر، تنوع (رنگ/سایز) و موجودی.' }),
+    N('b2', 'b', 'module', 'جست‌وجو و فیلتر', { icon: '🔍', x: 340, y: 60, summary: 'جست‌وجوی سریع با فیلترها', status: 'todo', est_days: 4, ins: [['فهرست محصولات']], outs: [['نتایجِ مرتب']], process: 'نمایه‌سازی عنوان و برچسب، رتبه‌بندی و صفحه‌بندی.' }),
+    N('c', null, 'section', 'خرید', { icon: '🛒', color: '#e0912b', x: 0, y: 190, summary: 'سبد، پرداخت و سفارش' }),
+    N('c1', 'c', 'module', 'سبدِ خرید', { icon: '🧺', x: 40, y: 80, summary: 'افزودن، حذف و تغییرِ تعداد', status: 'todo', est_days: 3, ins: [['فهرست محصولات'], ['نشست کاربر']], outs: [['اقلامِ سبد']] }),
+    N('c2', 'c', 'module', 'پرداختِ آنلاین', { icon: '💳', color: '#d64545', x: 340, y: 80, summary: 'اتصال به درگاه و تأیید', status: 'todo', est_days: 6, priority: 1, ins: [['اقلامِ سبد']], outs: [['وضعیتِ پرداخت']],
+      process: 'ساختِ تراکنش، هدایت به درگاه، بازگشت و تأییدِ سمتِ سرور.', tech: 'cURL · تأییدِ verify · ذخیرهٔ شناسهٔ ارجاع', flow: payFlow }),
+    N('c3', 'c', 'module', 'ثبت و پیگیریِ سفارش', { icon: '📋', x: 640, y: 80, summary: 'چرخهٔ سفارش و پیامک', status: 'todo', est_days: 5, ins: [['وضعیتِ پرداخت'], ['اقلامِ سبد']], outs: [['سفارش'], ['پیامکِ وضعیت']] }),
+    N('d', null, 'module', 'اعلان‌ها', { icon: '🔔', color: '#14a3a3', x: -290, y: 190, summary: 'پیامک و ایمیل', status: 'todo', est_days: 3, ins: [['سفارش']], outs: [['پیامک/ایمیل به مشتری']], process: 'صفِ ارسال با تلاشِ دوباره.' }),
+    N('e', null, 'module', 'پنلِ مدیریت', { icon: '📊', color: '#7a5af8', x: -290, y: 20, summary: 'گزارشِ فروش و مدیریت', status: 'todo', est_days: 8, ins: [['سفارش'], ['فهرست محصولات']], outs: [['گزارشِ فروش']] })
+  ];
+  return { project: { name: 'دمو: فروشگاه اینترنتیِ بزرگ', description: 'پروژهٔ نمونه با همهٔ امکاناتِ Milo: بلوک‌های رنگی و آیکن‌دار، پیوند با برچسب، فلوچارت، زمان‌بندی، نقطهٔ عطف، گزارش و پیوست. هر وقت خواستید پاکش کنید.',
+      start_date: D(-12), target_date: D(70), ai_brief: 'PHP 8 + MySQL روی cPanel؛ رابطِ فارسی و راست‌به‌چپ؛ بدونِ کتابخانهٔ سنگین؛ همهٔ متن‌ها فارسی.' },
+    nodes: nodes,
+    dependencies: [
+      { from: 'a', to: 'b', label: 'اسکیمای SQL' }, { from: 'b', to: 'c', label: 'فهرست محصولات' }, { from: 'c', to: 'd', label: 'سفارش' }, { from: 'c', to: 'e', label: 'سفارش‌ها' }, { from: 'b', to: 'e', label: 'محصولات' },
+      { from: 'a1', to: 'a2', label: 'اسکیمای SQL' }, { from: 'a2', to: 'a3', label: 'سطح دسترسی' }, { from: 'a1', to: 'b1', label: 'اسکیمای SQL' }, { from: 'a3', to: 'b1', label: 'مجوزها' },
+      { from: 'b1', to: 'b2', label: 'فهرست محصولات' }, { from: 'b1', to: 'c1', label: 'فهرست محصولات' }, { from: 'a2', to: 'c1', label: 'نشست کاربر' },
+      { from: 'c1', to: 'c2', label: 'اقلامِ سبد' }, { from: 'c2', to: 'c3', label: 'وضعیتِ پرداخت' }],
+    milestones: [{ title: 'پایانِ زیرساخت', date: D(8), note: 'دیتابیس و ورود آماده' }, { title: 'نسخهٔ آزمایشی', date: D(38) }, { title: 'انتشار', date: D(70), note: 'راه‌اندازی روی هاست' }],
+    logs: [
+      { node: 'a1', kind: 'note', body: 'از ۳NF شروع کردیم؛ جدولِ تنوعِ محصول جدا شد تا موجودی هر تنوع مستقل باشد.', date: D(-10) },
+      { node: 'a2', kind: 'note', body: 'قفلِ حساب پس از ۵ تلاشِ ناموفق اضافه شد. هنوز بازیابیِ رمز مانده.', date: D(-3) },
+      { node: null, kind: 'note', body: 'جلسهٔ شروع: ترتیبِ ساخت = زیرساخت ← کاتالوگ ← خرید ← اعلان‌ها و پنل.', date: D(-12) }],
+    work_report: [{ node: 'a1', status: 'done', progress: 100, summary: 'اسکیمای پایگاه‌داده کامل شد.', how: 'مهاجرت‌های SQL به‌ترتیبِ وابستگی نوشته و روی نمونه اجرا شد.', files_changed: ['db/001_users.sql', 'db/002_catalog.sql', 'db/003_orders.sql'], decisions: ['حذفِ نرم برای سفارش و محصول', 'جدولِ تنوعِ جدا'], how_to_test: 'اجرای همهٔ مهاجرت‌ها روی دیتابیسِ خالی', remaining: '', actual_days: 3, date: D(-9) }] };
+}
 
 /* ---------- به‌روزرسانی از گیت‌هاب ---------- */
 function updDialog(u) {
@@ -723,6 +846,20 @@ function updTick() {
 function elId(el) { return +el.getAttribute('data-id'); }
 var ACTS = {
   noop: function () {},
+  mapadd: function (el) { return createBlock(S.cv ? S.cv.centerOf() : { x: 0, y: 0 }, el.getAttribute('data-kind')); },
+  mapzoom: function (el) { var v = el.getAttribute('data-v'); if (!S.cv) return; if (v === 'fit') S.cv.fit(); else S.cv.zoomBy(v === 'in' ? 1.25 : 0.8); },
+  maplayout: function () {
+    var m = mapModel(true), items = m.items.filter(function (i) { return !i.ghost; }).map(function (i) { return { id: +i.id, x: Math.round(i.x), y: Math.round(i.y) }; });
+    if (!items.length) return; delete S.cvView[String(S.focus)];
+    return api('nodes_bulk', { project_id: S.pid, items: items }).then(function () { toast('چیدمان انجام شد'); return reload(); });
+  },
+  flowedit: function (el, ev, forId) {
+    var id = forId || elId(el), n = S.idx.byId.get(id); if (!n) return;
+    FLOW.edit({ title: n.title, flow: n.flow, toast: toast,
+      onSave: function (flow) { return api('node_save', { project_id: S.pid, id: id, flow: flow }).then(function () { toast('فلوچارت ذخیره شد'); return loadProject(S.pid); }); },
+      onClose: function () { render(true); } });
+  },
+  flowdel: function (el) { if (!confirm('فلوچارتِ این بخش پاک شود؟')) return; return api('node_save', { project_id: S.pid, id: elId(el), flow: null }).then(reload); },
   update: function () { return api('update_status').then(function (j) { updDialog(j.upd); }); },
   home: function () { location.hash = '#/'; },
   open: function (el) { location.hash = '#/p/' + elId(el) + '/dash'; },
@@ -736,13 +873,26 @@ var ACTS = {
       setup: function (f, close) { $('[data-del]', f).addEventListener('click', guard(function () { if (!confirm('پروژه «' + p.name + '» با همهٔ بخش‌ها، گزارش‌ها و پیوست‌ها برای همیشه پاک شود؟')) return; return api('project_delete', { project_id: S.pid }).then(function () { close(); S.P = null; S.pid = 0; location.hash = '#/'; }); })); },
       onok: function (f) { return saveProjectForm(f, S.pid).then(reload); } });
   },
-  sample: function () { return api('import', { mode: 'new', doc: sampleDoc() }).then(function (r) { location.hash = '#/p/' + r.project_id + '/map'; }); },
+  sample: function () {
+    return api('import', { mode: 'new', doc: sampleDoc() }).then(function (r) {
+      var pid = r.project_id;
+      return api('project_get', { project_id: pid }).then(function (P) {
+        var n = P.nodes.filter(function (x) { return x.title === 'طراحیِ پایگاه‌داده'; })[0];
+        return demoImage().then(function (blob) {
+          if (!n || !blob) return;
+          var fd = new FormData(); fd.append('project_id', pid); fd.append('node_id', n.id); fd.append('kind', 'note');
+          fd.append('body', 'نمودارِ ER (عکسِ نمونه — شما می‌توانید عکسِ خودتان را در کادرِ یادداشت Paste کنید)'); fd.append('files[]', blob, 'er-diagram.png');
+          return api('log_add', fd);
+        });
+      }).then(function () { S.pid = 0; S.P = null; location.hash = '#/p/' + pid + '/map'; route(); });
+    });
+  },
   importnew: function () { var i = document.createElement('input'); i.type = 'file'; i.accept = '.json'; i.onchange = function () { if (i.files[0]) readImport(i.files[0], 0); }; i.click(); },
-  pick: function (el) { var id = elId(el); if (!id) return; S.sel = id; if (S.tab === 'map') S.focus = S.idx.parentOf(id); renderContent(true); renderDrawer(); },
+  pick: function (el) { var id = elId(el); if (!id) return; S.sel = id; S.drawerOpen = true; if (S.tab === 'map') S.focus = S.idx.parentOf(id); renderContent(true); renderDrawer(); },
   focus: function (el) { S.focus = elId(el); renderContent(); },
   cardgo: function (el) { var id = elId(el); S.sel = id; if (S.idx.children(id).length) S.focus = id; renderContent(); renderDrawer(); },
   ghostgo: function (el) { var id = elId(el); S.sel = id; S.focus = S.idx.parentOf(id); renderContent(); renderDrawer(); },
-  closedrawer: function () { S.sel = 0; renderContent(true); renderDrawer(); },
+  closedrawer: function () { S.sel = 0; S.drawerOpen = false; renderContent(true); renderDrawer(); },
   addnode: function (el) { addNodeDialog(+el.getAttribute('data-parent') || 0); },
   toggle: function (el, ev) { ev.stopPropagation(); var id = elId(el); S.open[id] = !isOpen(id); renderContent(true); },
   expand: function (el) { var on = el.getAttribute('data-v') === '1'; S.idx.preorder.forEach(function (id) { if (S.idx.children(id).length) S.open[id] = on; }); renderContent(true); },
@@ -773,6 +923,8 @@ var ACTS = {
   clearsched: function () { if (!confirm('همهٔ تاریخ‌های شروعِ ثبت‌شده پاک شود (برنامه دوباره خودکار از وابستگی‌ها محاسبه می‌شود)؟')) return; var items = S.sch.order.filter(function (id) { return S.idx.byId.get(id).start_date; }).map(function (id) { return { id: id, start_date: null }; }); if (!items.length) return; return api('nodes_bulk', { project_id: S.pid, items: items }).then(reload); }
 };
 document.addEventListener('click', function (e) {
+  var dot = e.target.closest ? e.target.closest('#colpick .cv-dot') : null;
+  if (dot) { var box = dot.parentNode; $$('.cv-dot', box).forEach(function (d) { d.classList.remove('on'); }); dot.classList.add('on'); $('[name=color]', box.parentNode).value = dot.getAttribute('data-c'); return; }
   var el = e.target.closest ? e.target.closest('[data-act]') : null;
   if (!el || el.tagName === 'INPUT' && el.type !== 'checkbox') return;
   var fn = ACTS[el.getAttribute('data-act')]; if (!fn) return;

@@ -18,6 +18,8 @@ $v = fn(string $f) => (string)@filemtime(__DIR__ . '/assets/' . $f);
 <div id="app"><div class="boot">در حال بارگذاری…</div></div>
 <div id="toasts"></div>
 <script src="assets/jalali.js?v=<?= $v('jalali.js') ?>"></script>
+<script src="assets/canvas.js?v=<?= $v('canvas.js') ?>"></script>
+<script src="assets/flow.js?v=<?= $v('flow.js') ?>"></script>
 <script src="assets/engine.js?v=<?= $v('engine.js') ?>"></script>
 <script src="assets/app.js?v=<?= $v('app.js') ?>"></script>
 </body>

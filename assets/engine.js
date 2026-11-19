@@ -143,13 +143,15 @@
     'RULE 1 - STRUCTURE CHANGES: if you change the structure in any way (add, remove, rename or split nodes; change inputs/outputs/process; add or remove dependencies; change estimates or milestones) you MUST deliver an updated copy of THIS file in the same schema so the user can import it back. Keep every existing "id" unchanged. New nodes get a temporary string id such as "new-1" (usable as "parent" and in dependencies). To remove something set "deleted": true on it. Returning only the changed items is accepted; the full file is preferred. Never change "schema".',
     'RULE 2 - WORK REPORT: after you finish (or partly finish) work, add an entry to the top-level "work_report" array for EVERY node you worked on, and deliver the file. Entry format: {"node": <id>, "status": "todo|doing|review|done|blocked|hold", "progress": 0-100, "summary": "...", "how": "how it was implemented", "files_changed": ["path"], "decisions": ["..."], "how_to_test": "...", "deviations": "...", "remaining": "...", "actual_days": optional number}. Be honest: mark done only what really works. The user imports the file and the timeline, progress and per-node history update automatically.',
     'DELIVERY: always hand the result back as a downloadable UTF-8 JSON file named "<project>-updated.pm.json" (valid JSON, no comments) plus a short summary in chat. Write all human-readable text in the language of the existing content (Persian unless the file says otherwise).',
+    'VISUAL FIELDS: x, y, color (#rrggbb) and icon on a node are canvas layout hints - keep them unchanged (new nodes may omit them). "flow" is an optional flowchart that explains the node\'s process graphically: {"nodes":[{"id","type","text","x","y","w","h"}],"edges":[{"id","from","to","label"}]} with type one of start,end,process,decision,io,sub,db,note,text (edge labels on a decision are usually yes/no). Follow it when implementing; if you change the process, update the flow too, and you may add a flow to a node that has none.',
     'Never invent ids for existing nodes, never drop the "id" of an existing item, and never put secrets or passwords in the file.'
   ];
 
   function nodeOut(idx, n) {
     return { id: n.id, parent: n.parent_id || null, order: n.sort, kind: n.kind, title: n.title, summary: n.summary, details: n.details,
       inputs: n.inputs, outputs: n.outputs, process: n.process, tech: n.tech, priority: n.priority, status: n.status, progress: n.progress,
-      est_days: n.est_days, final_days: n.final_days, start_date: n.start_date, done_date: n.done_date, assignee: n.assignee, tags: n.tags };
+      est_days: n.est_days, final_days: n.final_days, start_date: n.start_date, done_date: n.done_date, assignee: n.assignee, tags: n.tags,
+      color: n.color || null, icon: n.icon || null, x: n.x == null ? null : n.x, y: n.y == null ? null : n.y, flow: n.flow || null };
   }
 
   function buildExport(idx, sch) {
@@ -196,6 +198,7 @@
       if (n.inputs.length) { L.push('', '**ورودی‌ها:**'); n.inputs.forEach(function (x) { L.push('- ' + x.name + (x.desc ? ': ' + x.desc : '')); }); }
       if (n.outputs.length) { L.push('', '**خروجی‌ها:**'); n.outputs.forEach(function (x) { L.push('- ' + x.name + (x.desc ? ': ' + x.desc : '')); }); }
       if (n.process) L.push('', '**پردازش:**', '', n.process);
+      if (n.flow && W.FLOW) { var mm = W.FLOW.mermaid(n.flow); if (mm) L.push('', '**فلوچارت:**', '', '```mermaid', mm, '```'); }
       if (n.tech) L.push('', '**نکات فنی:**', '', n.tech);
       var di = (idx.inn.get(id) || []);
       if (di.length) { L.push('', '**وابسته به:**'); di.forEach(function (x) { L.push('- ' + idx.byId.get(x.from_id).title + ' `#' + x.from_id + '`' + (x.label ? ' (' + x.label + ')' : '')); }); }

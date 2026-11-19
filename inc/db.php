@@ -30,8 +30,8 @@ function pm_db(): PDO
 function pm_schema(PDO $db): void
 {
     $v = (int)$db->query('PRAGMA user_version')->fetchColumn();
-    if ($v >= 1) return;
-    $db->exec("
+    if ($v >= 2) return;
+    if ($v < 1) $db->exec("
     CREATE TABLE IF NOT EXISTS users(
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
       pass_hash TEXT NOT NULL, created_at TEXT NOT NULL);
@@ -64,6 +64,11 @@ function pm_schema(PDO $db): void
       name TEXT NOT NULL, stored TEXT NOT NULL, mime TEXT DEFAULT '', size INTEGER DEFAULT 0, created_at TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS files_p ON files(project_id);
     PRAGMA user_version=1;");
+    // v2: بوم گرافیکی (جایگاه، رنگ، آیکن) و فلوچارتِ هر بخش
+    foreach (['x REAL', 'y REAL', 'color TEXT', 'icon TEXT', 'flow TEXT'] as $c) {
+        try { $db->exec("ALTER TABLE nodes ADD COLUMN $c"); } catch (Throwable $e) { /* ستون از قبل هست */ }
+    }
+    $db->exec('PRAGMA user_version=2');
 }
 
 function pm_now(): string { return date('Y-m-d H:i:s'); }
@@ -115,6 +120,10 @@ function pm_clean_node(array $in): array
     foreach (['est_days', 'final_days'] as $k) if (array_key_exists($k, $in)) $o[$k] = pm_days($in[$k]);
     foreach (['start_date', 'done_date'] as $k) if (array_key_exists($k, $in)) $o[$k] = pm_date($in[$k]);
     foreach (['inputs', 'outputs'] as $k) if (array_key_exists($k, $in)) $o[$k] = json_encode(pm_io($in[$k]), JSON_UNESCAPED_UNICODE);
+    foreach (['x', 'y'] as $k) if (array_key_exists($k, $in)) $o[$k] = is_numeric($in[$k]) ? max(-100000, min(100000, round((float)$in[$k], 1))) : null;
+    if (array_key_exists('color', $in)) $o['color'] = pm_color($in['color']);
+    if (array_key_exists('icon', $in)) $o['icon'] = mb_substr(trim((string)$in['icon']), 0, 8) ?: null;
+    if (array_key_exists('flow', $in)) { $fl = pm_flow_clean($in['flow']); $o['flow'] = $fl ? json_encode($fl, JSON_UNESCAPED_UNICODE) : null; }
     return $o;
 }
 
@@ -141,8 +150,47 @@ function pm_norm(array $row, array $changed): array
     return $row;
 }
 
+function pm_color($v): ?string
+{
+    return is_string($v) && preg_match('/^#[0-9a-fA-F]{6}$/', $v) ? strtolower($v) : null;
+}
+
+const PM_FLOW_TYPES = ['start', 'end', 'process', 'decision', 'io', 'sub', 'db', 'note', 'text'];
+
+/** فلوچارت: {v:1, nodes:[{id,type,text,x,y,w,h,color}], edges:[{id,from,to,label,color}]} */
+function pm_flow_clean($f): ?array
+{
+    if (!is_array($f) || !is_array($f['nodes'] ?? null) || !$f['nodes']) return null;
+    $nodes = []; $ids = [];
+    foreach (array_slice($f['nodes'], 0, 400) as $n) {
+        if (!is_array($n)) continue;
+        $id = preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($n['id'] ?? ''));
+        $id = substr($id, 0, 24);
+        if ($id === '' || isset($ids[$id])) continue;
+        $ids[$id] = true;
+        $t = in_array($n['type'] ?? '', PM_FLOW_TYPES, true) ? $n['type'] : 'process';
+        $nodes[] = ['id' => $id, 'type' => $t, 'text' => pm_str($n['text'] ?? '', 600),
+            'x' => max(-100000, min(100000, round((float)($n['x'] ?? 0), 1))), 'y' => max(-100000, min(100000, round((float)($n['y'] ?? 0), 1))),
+            'w' => max(40, min(700, round((float)($n['w'] ?? 160)))), 'h' => max(30, min(500, round((float)($n['h'] ?? 64)))),
+            'color' => pm_color($n['color'] ?? null)];
+    }
+    $edges = []; $eids = [];
+    foreach (array_slice(is_array($f['edges'] ?? null) ? $f['edges'] : [], 0, 800) as $e) {
+        if (!is_array($e)) continue;
+        $a = (string)($e['from'] ?? ''); $b = (string)($e['to'] ?? '');
+        if (!isset($ids[$a]) || !isset($ids[$b]) || $a === $b) continue;
+        $id = substr(preg_replace('/[^A-Za-z0-9_\-]/', '', (string)($e['id'] ?? '')), 0, 24) ?: ('e' . count($edges));
+        if (isset($eids[$id])) $id .= count($edges);
+        $eids[$id] = true;
+        $edges[] = ['id' => $id, 'from' => $a, 'to' => $b, 'label' => pm_str($e['label'] ?? '', 100), 'color' => pm_color($e['color'] ?? null)];
+    }
+    return $nodes ? ['v' => 1, 'nodes' => $nodes, 'edges' => $edges] : null;
+}
+
 function pm_node_out(array $r): array
 {
+    $r['flow'] = !empty($r['flow']) ? (json_decode((string)$r['flow'], true) ?: null) : null;
+    foreach (['x', 'y'] as $k) if (($r[$k] ?? null) !== null) $r[$k] = (float)$r[$k];
     foreach (['id', 'project_id', 'parent_id', 'priority', 'progress', 'sort'] as $k) {
         if ($r[$k] !== null) $r[$k] = (int)$r[$k];
     }
