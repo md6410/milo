@@ -13,6 +13,9 @@
 """
 import json
 
+# دستهٔ ماژول‌ها و پروژه‌های همراهِ برنامه (همه از Weby/Invora: سایت‌محور و فروشگاهی)
+DEFAULT_CAT = 'سایت‌محور و فروشگاهی'
+
 
 def P(name, desc='', use='', unused=False, why=''):
     return {'name': name, 'desc': desc, 'use': use, 'unused': unused, 'why': why}
@@ -287,7 +290,7 @@ def export(doc, slug, title):
         deps.append(d)
     deps.sort(key=lambda d: 1 if d.get('two') else 0)   # وابستگی‌های دوطرفه آخر تا بررسیِ دور را نشکنند
     root = doc.nodes[0]
-    return {'schema': 'weby-projectmanager/1', 'library_module': {'slug': slug, 'title': title, 'version': 1},
+    return {'schema': 'weby-projectmanager/1', 'library_module': {'slug': slug, 'title': title, 'version': 1, 'group': DEFAULT_CAT},
             'project': {'name': 'کتابخانهٔ ماژول‌ها'}, 'nodes': nodes, 'dependencies': deps, 'milestones': [], 'logs': [], 'work_report': []}
 
 
@@ -396,6 +399,6 @@ def export_project(doc, slug, title, summary, name=None):
     """همان export ولی برای پروژهٔ آماده (bundled_project) نه ماژولِ کتابخانه."""
     data = export(doc, slug, title)
     data.pop('library_module', None)
-    data['bundled_project'] = {'slug': slug, 'title': title, 'summary': summary, 'version': 1}
+    data['bundled_project'] = {'slug': slug, 'title': title, 'summary': summary, 'version': 1, 'category': DEFAULT_CAT}
     data['project'] = {'name': name or title}
     return data

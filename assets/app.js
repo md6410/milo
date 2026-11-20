@@ -128,6 +128,12 @@ function relTime(s) {
   if (diff < 60) return 'همین الان'; if (diff < 3600) return FA(Math.floor(diff / 60)) + ' دقیقه پیش'; if (diff < 86400) return FA(Math.floor(diff / 3600)) + ' ساعت پیش';
   return FA(Math.floor(diff / 86400)) + ' روز پیش';
 }
+/* دسته‌های ماژول (می‌شود دستهٔ تازه هم نوشت) و زبان‌های پیشنهادیِ کدِ نمونه */
+var CAT_DEFAULT = 'سایت‌محور و فروشگاهی';
+var CATS = [CAT_DEFAULT, 'سیستم‌های سخت‌افزاری و الکترونیک', 'نرم‌افزارِ دسکتاپ و سرور', 'اپلیکیشنِ موبایل', 'عمومی'];
+var LANGS = ['PHP', 'JavaScript', 'TypeScript', 'Python', 'SQL', 'HTML/CSS', 'Bash', 'C', 'C++', 'Arduino (C++)', 'MicroPython', 'C#', 'Java', 'Kotlin', 'Swift', 'Dart', 'Go', 'Rust', 'Verilog', 'VHDL'];
+function catOf(x) { return (x && (x.category || x.group)) || CAT_DEFAULT; }
+function catList(extra) { var o = CATS.slice(); (extra || []).forEach(function (c) { if (c && o.indexOf(c) < 0) o.push(c); }); return o; }
 function needEdit() { if (S.editing) return true; toast('برای تغییر، اول «✎ ویرایش» را بزنید', true); return false; }
 
 /* ---------- حالتِ ویرایش / ذخیره / لغو ---------- */
@@ -882,9 +888,12 @@ function bundledDialog() {
         (x.installed ? ' <span class="pill">قبلاً افزوده شده</span>' : '') + '<div class="mut sm">' + esc(x.summary || '') + '</div>' +
         '<div class="sm mut">' + FA(x.nodes) + ' گره' + (kind === 'm' ? ' · ⇢ ' + FA(x.inputs) + ' ورودی · ' + FA(x.outputs) + ' خروجی' : '') + '</div></div></label>';
     }
-    var body = '';
-    if (j.projects.length) body += '<h4 style="margin:6px 0">🗺️ پروژه‌های آماده (از همین ماژول‌ها ساخته شده‌اند)</h4><div class="liblist">' + j.projects.map(function (x) { return row(x, 'p'); }).join('') + '</div>';
-    if (j.modules.length) body += '<h4 style="margin:12px 0 6px">📚 ماژول‌های آمادهٔ کتابخانه</h4><div class="row" style="margin-bottom:6px"><button type="button" class="btn sm" data-all="1">انتخابِ همه</button><button type="button" class="btn sm" data-all="0">هیچ‌کدام</button></div><div class="liblist">' + j.modules.map(function (x) { return row(x, 'm'); }).join('') + '</div>';
+    var body = '', grp = function (list, kind) {
+      var cs = catList(list.map(catOf)).filter(function (c) { return list.some(function (x) { return catOf(x) === c; }); });
+      return cs.map(function (c) { return '<div class="mut sm" style="margin:8px 0 4px">🗂 ' + esc(c) + '</div>' + list.filter(function (x) { return catOf(x) === c; }).map(function (x) { return row(x, kind); }).join(''); }).join('');
+    };
+    if (j.projects.length) body += '<h4 style="margin:6px 0">🗺️ پروژه‌های آماده (از همین ماژول‌ها ساخته شده‌اند)</h4><div class="liblist">' + grp(j.projects, 'p') + '</div>';
+    if (j.modules.length) body += '<h4 style="margin:12px 0 6px">📚 ماژول‌های آمادهٔ کتابخانه</h4><div class="row" style="margin-bottom:6px"><button type="button" class="btn sm" data-all="1">انتخابِ همه</button><button type="button" class="btn sm" data-all="0">هیچ‌کدام</button></div><div class="liblist">' + grp(j.modules, 'm') + '</div>';
     if (!body) body = '<div class="empty">فایلِ آماده‌ای همراهِ برنامه نیست.</div>';
     body += '<p class="mut sm">ماژول‌ها وارد «کتابخانهٔ ماژول‌ها» می‌شوند (موارد تکراری رد می‌شوند)؛ هر پروژهٔ آماده یک پروژهٔ تازه می‌سازد. می‌توانید بعداً هر ماژول را در پروژهٔ خودتان درج کنید.</p>';
     return modal({ title: '📦 نمونه‌ها و ماژول‌های آماده', cls: 'wide', ok: 'افزودنِ انتخاب‌شده‌ها', body: body,
@@ -917,9 +926,14 @@ function libPicker(onPick) {
         '<div class="mut sm">' + esc(m.summary || '') + '</div><div class="sm">⇢ ' + FA((m.inputs || []).length) + ' ورودی: ' + esc((m.inputs || []).map(function (x) { return x.name; }).join('، ') || '—') + ' · ⇠ ' + FA((m.outputs || []).length) + ' خروجی: ' + esc((m.outputs || []).map(function (x) { return x.name; }).join('، ') || '—') + ' · ' + FA(m.children) + ' بخشِ داخلی</div></div>' +
         '<button type="button" class="btn pri sm" data-pick="' + m.id + '">درج</button></div>';
     }).join('');
+    var cats = catList(j.modules.map(catOf)).filter(function (c) { return j.modules.some(function (m) { return catOf(m) === c; }); });
+    var rowOf = {}; rows.split('<div class="libr" data-lid="').slice(1).forEach(function (r) { rowOf[+r.slice(0, r.indexOf('"'))] = '<div class="libr" data-lid="' + r; });
+    rows = cats.map(function (c) { var ms = j.modules.filter(function (m) { return catOf(m) === c; }); return '<div data-cat="' + esc(c) + '"><h4 style="margin:10px 0 6px">🗂 ' + esc(c) + ' <span class="mut sm">(' + FA(ms.length) + ')</span></h4>' + ms.map(function (m) { return rowOf[m.id] || ''; }).join('') + '</div>'; }).join('');
+    if (cats.length > 1) rows = '<label class="f" style="max-width:320px"><span>دسته</span><select data-catf><option value="">همهٔ دسته‌ها</option>' + cats.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join('') + '</select></label>' + rows;
     var mdl = modal({ title: '📚 ماژولی از کتابخانه انتخاب کنید', cls: 'wide', noOk: true, noFocus: true,
       body: rows ? '<div class="liblist">' + rows + '</div><p class="mut sm">با «درج»، یک رونوشتِ کامل (با زیرمجموعه و فلوچارت) در همین جایگاه ساخته می‌شود و می‌توانید برای این پروژه تغییرش دهید؛ منبع در بلوک نوشته می‌شود.</p>' : '<div class="empty">کتابخانه هنوز ماژولی ندارد.<br>در «ابزار ← کتابخانهٔ ماژول‌ها» بسازید، یا یک ماژولِ پروژه را «ذخیره در کتابخانه» کنید.</div>',
-      setup: function (f, close) { $$('[data-pick]', f).forEach(function (b) { b.addEventListener('click', function () { var m = j.modules.filter(function (x) { return x.id === +b.getAttribute('data-pick'); })[0]; close(); onPick(m); }); }); } });
+      setup: function (f, close) { var cf = $('[data-catf]', f); if (cf) cf.addEventListener('change', function () { $$('[data-cat]', f).forEach(function (g) { g.style.display = !cf.value || g.getAttribute('data-cat') === cf.value ? '' : 'none'; }); });
+        $$('[data-pick]', f).forEach(function (b) { b.addEventListener('click', function () { var m = j.modules.filter(function (x) { return x.id === +b.getAttribute('data-pick'); })[0]; close(); onPick(m); }); }); } });
     return mdl;
   });
 }
@@ -1264,6 +1278,11 @@ function renderDrawer() {
       '<div class="flthumb" data-act="flowedit" data-id="' + id + '" title="کلیک کنید">' + FLOW.svg(n.flow, { width: '100%', height: 'auto', ink: 'currentColor' }) + '</div><div class="row" style="margin-top:6px"><button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">' + (ed ? '✎ ویرایش' : '🔍 بزرگ‌نمایی') + '</button>' + (ed ? '<button type="button" class="btn sm danger" data-act="flowdel" data-id="' + id + '">حذف</button>' : '') + '</div>' :
       (ed ? '<button type="button" class="btn sm" data-act="flowedit" data-id="' + id + '">＋ رسمِ فلوچارت</button>' : '<div class="mut sm">فلوچارتی رسم نشده.</div>')) + '</div>' +
     '<fieldset class="fs"' + dis + '><label class="f"><span>نکاتِ فنی (فناوری، جدول‌ها، API، فایل‌ها…)</span><textarea name="tech">' + esc(n.tech) + '</textarea></label>' +
+    '<div class="sub"><h4>💻 کدِ نمونه <span class="mut sm">— الگو و ایده برای تولیدِ کد (در فایلِ هوش مصنوعی هم می‌رود)</span></h4>' +
+      '<label class="f" style="max-width:240px"><span>زبانِ برنامه‌نویسی</span><input name="code_lang" list="dl-langs" value="' + esc(n.code_lang || '') + '" placeholder="مثلاً PHP یا Arduino (C++)"></label>' +
+      '<label class="f"><span>کد</span><textarea name="code" class="code" dir="ltr" spellcheck="false" placeholder="// یک نمونهٔ کوتاه و کارا">' + esc(n.code || '') + '</textarea></label>' +
+      '<datalist id="dl-langs">' + LANGS.map(function (l) { return '<option value="' + esc(l) + '">'; }).join('') + '</datalist></div>' +
+    (n.kind === 'module' ? '<label class="f"><span>دسته (این ماژول برای چه نوع پروژه‌هایی است؟ — می‌توانید دستهٔ تازه بنویسید)</span><input name="category" list="dl-cats" value="' + esc(n.category || (isLib() ? CAT_DEFAULT : '')) + '" placeholder="' + esc(CAT_DEFAULT) + '"><datalist id="dl-cats">' + catList().map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist></label>' : '') +
     '<div class="row"><div class="f grow"><span class="mut sm" style="display:block">رنگ</span><span class="cv-dots" id="colpick">' + PMCanvas.PALETTE.map(function (c) { return '<i class="cv-dot' + (n.color === c ? ' on' : '') + '" data-c="' + c + '" style="background:' + c + '"></i>'; }).join('') + '<i class="cv-dot none' + (!n.color ? ' on' : '') + '" data-c="">∅</i></span><input type="hidden" name="color" value="' + esc(n.color || '') + '"></div>' +
     '<label class="f" style="width:90px"><span>آیکن</span><input name="icon" value="' + esc(n.icon || '') + '" maxlength="4"></label></div>' +
     (leaf ? '<div class="row"><label class="f grow"><span>برآورد (روز)</span><input type="number" step="0.5" min="0" name="est_days" value="' + (n.est_days == null ? '' : n.est_days) + '" placeholder="پیشنهاد: ' + FA(E.heuristic(n)) + '"></label>' +
@@ -1282,7 +1301,7 @@ function renderDrawer() {
 }
 function collectNode(f) {
   var o = {};
-  ['title', 'summary', 'details', 'process', 'tech', 'assignee', 'tags'].forEach(function (k) { var e = $('[name=' + k + ']', f); if (e) o[k] = e.value; });
+  ['title', 'summary', 'details', 'process', 'tech', 'assignee', 'tags', 'code_lang', 'code', 'category'].forEach(function (k) { var e = $('[name=' + k + ']', f); if (e) o[k] = e.value; });
   var kd = $('[name=kind]', f); if (kd && kd.value) o.kind = kd.value;
   o.priority = +$('[name=priority]', f).value;
   var cl = $('[name=color]', f); if (cl) o.color = cl.value || '';

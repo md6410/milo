@@ -21,3 +21,4 @@
 - Weby tests are mined by `tools/library/wtests.py` (+ `wmap.py` file→module rules, `wattach.py`); Invora's are in `tools/library/itests.py`. Rebuild projects with `python3 tools/library/build.py`.
 - Light Weby modules get a «جریان‌های اصلی» section (tasks from file headers/signatures: `wdeep.py`); Invora technical/UI sections come from `icode.py`.
 - Map/flowchart routing runs ONLY on «✨ چیدمان خودکار» (`PMCanvas.arrange()`); opening a page just draws saved routes (`routes` table, schema v7; flowchart edges carry `pts/mid/hide`). Never add routing or layout work to page load.
+- Nodes carry `code_lang`/`code` (user's example code, exported to the AI file) and `category` (module category; default «سایت‌محور و فروشگاهی», schema v8). Library pickers group by category.

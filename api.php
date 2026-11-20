@@ -182,7 +182,8 @@ try {
             $mods = array_map('pm_node_out', $st->fetchAll());
             foreach ($mods as &$m) {
                 $m['children'] = count(pm_subtree($db, $lid, $m['id']));
-                unset($m['details'], $m['flow'], $m['tech']);
+                unset($m['details'], $m['flow'], $m['tech'], $m['code']);
+                if (empty($m['category'])) $m['category'] = PM_DEFAULT_CAT;
             }
             out(['library_id' => $lid, 'modules' => $mods]);
 
@@ -203,10 +204,10 @@ try {
                     $root = null;
                     foreach ($j['nodes'] ?? [] as $n) if (empty($n['parent'])) { $root = $n; break; }
                     $mods[] = ['file' => $base, 'title' => $j['library_module']['title'] ?? $base, 'summary' => $root['summary'] ?? '', 'icon' => $root['icon'] ?? '🧩',
-                        'nodes' => count($j['nodes'] ?? []), 'inputs' => count($root['inputs'] ?? []), 'outputs' => count($root['outputs'] ?? []), 'group' => $j['library_module']['group'] ?? '',
+                        'nodes' => count($j['nodes'] ?? []), 'inputs' => count($root['inputs'] ?? []), 'outputs' => count($root['outputs'] ?? []), 'group' => ($j['library_module']['group'] ?? '') ?: ($root['category'] ?? '') ?: PM_DEFAULT_CAT,
                         'installed' => isset($haveT[$j['library_module']['title'] ?? ''])];
                 } elseif (!empty($j['bundled_project'])) {
-                    $projs[] = ['file' => $base, 'title' => $j['bundled_project']['title'] ?? $base, 'summary' => $j['bundled_project']['summary'] ?? '', 'nodes' => count($j['nodes'] ?? []),
+                    $projs[] = ['file' => $base, 'title' => $j['bundled_project']['title'] ?? $base, 'summary' => $j['bundled_project']['summary'] ?? '', 'nodes' => count($j['nodes'] ?? []), 'group' => ($j['bundled_project']['category'] ?? '') ?: PM_DEFAULT_CAT,
                         'installed' => isset($hp[$j['project']['name'] ?? ''])];
                 }
             }
@@ -228,6 +229,9 @@ try {
                     $t->execute([$lib, $j['library_module']['title'] ?? '']);
                     if ((int)$t->fetchColumn() > 0 && empty($in['replace'])) { $res['skipped']++; continue; }
                     $r = pm_import($db, $j, 'update', $lib, $author);
+                    $cat = ($j['library_module']['group'] ?? '') ?: PM_DEFAULT_CAT;
+                    $db->prepare("UPDATE nodes SET category=? WHERE project_id=? AND parent_id IS NULL AND kind='module' AND title=? AND (category IS NULL OR category='')")
+                       ->execute([$cat, $lib, $j['library_module']['title'] ?? '']);
                     $res['modules']++; $res['warnings'] = array_merge($res['warnings'], $r['warnings']);
                 } elseif (!empty($j['bundled_project'])) {
                     $r = pm_import($db, $j, 'new', null, $author);

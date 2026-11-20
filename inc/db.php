@@ -30,7 +30,7 @@ function pm_db(): PDO
 function pm_schema(PDO $db): void
 {
     $v = (int)$db->query('PRAGMA user_version')->fetchColumn();
-    if ($v >= 7) return;
+    if ($v >= 8) return;
     if ($v < 1) $db->exec("
     CREATE TABLE IF NOT EXISTS users(
       id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
@@ -122,7 +122,19 @@ function pm_schema(PDO $db): void
           PRIMARY KEY(project_id, node_id))");
         $db->exec('PRAGMA user_version=7');
     }
+    if ($v < 8) {
+        // v8: کدِ نمونه (زبان + کد) برای هر گره، و دستهٔ ماژول (سایت‌محور و فروشگاهی، سخت‌افزاری…)؛ ماژول‌های فعلیِ کتابخانه = سایت‌محور و فروشگاهی
+        foreach (["code_lang TEXT DEFAULT ''", "code TEXT DEFAULT ''", "category TEXT DEFAULT ''"] as $c) {
+            try { $db->exec('ALTER TABLE nodes ADD COLUMN ' . $c); } catch (Throwable $e) { /* هست */ }
+        }
+        $db->prepare("UPDATE nodes SET category=? WHERE parent_id IS NULL AND kind='module' AND (category IS NULL OR category='') AND project_id IN (SELECT id FROM projects WHERE kind='library')")
+           ->execute([PM_DEFAULT_CAT]);
+        $db->exec('PRAGMA user_version=8');
+    }
 }
+
+/** دستهٔ پیش‌فرضِ ماژول‌ها (همهٔ ماژول‌های فعلیِ همراهِ برنامه از Weby و Invora در این دسته‌اند) */
+const PM_DEFAULT_CAT = 'سایت‌محور و فروشگاهی';
 
 const PM_TEST_KINDS = ['unit' => 'واحد', 'integration' => 'یکپارچگی', 'e2e' => 'سرتاسری', 'manual' => 'دستی', 'security' => 'امنیتی', 'perf' => 'کارایی'];
 const PM_TEST_EXPECT = ['value' => 'برابر مقدار', 'range' => 'در بازه', 'contains' => 'شامل متن', 'true' => 'درست باشد', 'false' => 'نادرست باشد', 'error' => 'خطا بدهد', 'any' => 'شرحِ آزاد'];
@@ -240,7 +252,7 @@ function pm_clean_node(array $in): array
 {
     $o = [];
     $lim = ['title' => 300, 'summary' => 2000, 'details' => 60000, 'process' => 60000, 'tech' => 20000,
-            'assignee' => 200, 'tags' => 300];
+            'assignee' => 200, 'tags' => 300, 'code_lang' => 40, 'code' => 200000, 'category' => 100];
     foreach ($lim as $k => $n) if (array_key_exists($k, $in)) $o[$k] = pm_str($in[$k], $n);
     if (array_key_exists('kind', $in) && in_array($in['kind'], PM_KINDS, true)) $o['kind'] = $in['kind'];
     if (array_key_exists('status', $in) && in_array($in['status'], PM_STATUSES, true)) $o['status'] = $in['status'];
@@ -512,8 +524,8 @@ function pm_copy_subtree(PDO $db, int $srcId, int $dstPid, ?int $dstParent, arra
     $in = implode(',', array_map('intval', $ids));
     $rows = $db->query("SELECT * FROM nodes WHERE id IN ($in) ORDER BY sort,id")->fetchAll();
     $map = []; $now = pm_now();
-    $ins = $db->prepare('INSERT INTO nodes(project_id,parent_id,kind,title,summary,details,inputs,outputs,process,tech,priority,status,progress,est_days,final_days,start_date,done_date,assignee,tags,sort,x,y,color,icon,flow,work_seconds,src_id,src_name,created_at,updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+    $ins = $db->prepare('INSERT INTO nodes(project_id,parent_id,kind,title,summary,details,inputs,outputs,process,tech,priority,status,progress,est_days,final_days,start_date,done_date,assignee,tags,sort,x,y,color,icon,flow,work_seconds,src_id,src_name,created_at,updated_at,code_lang,code,category)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
     $byParent = [];
     foreach ($rows as $r) $byParent[(int)($r['parent_id'] ?? 0)][] = $r;
     $walk = function ($r, ?int $newParent, bool $isRoot) use (&$walk, &$map, $ins, $dstPid, $now, $over, $byParent, $db) {
@@ -523,7 +535,7 @@ function pm_copy_subtree(PDO $db, int $srcId, int $dstPid, ?int $dstParent, arra
         $sort = $isRoot ? pm_next_sort($db, $dstPid, $newParent) : (int)$r['sort'];
         $ins->execute([$dstPid, $newParent, $r['kind'], $title, $r['summary'], $r['details'], $isRoot ? pm_reset_ports($r['inputs']) : $r['inputs'], $isRoot ? pm_reset_ports($r['outputs']) : $r['outputs'], $r['process'], $r['tech'], $r['priority'],
             'todo', 0, $r['est_days'], $r['final_days'], null, null, '', $r['tags'], $sort, $x, $y, $r['color'], $r['icon'], $r['flow'], 0,
-            $r['id'], $isRoot ? ($over['src_name'] ?? $r['title']) : ($r['src_name'] ?: null), $now, $now]);
+            $r['id'], $isRoot ? ($over['src_name'] ?? $r['title']) : ($r['src_name'] ?: null), $now, $now, $r['code_lang'] ?? '', $r['code'] ?? '', $r['category'] ?? '']);
         $nid = (int)$db->lastInsertId();
         $map[(int)$r['id']] = $nid;
         foreach ($byParent[(int)$r['id']] ?? [] as $c) $walk($c, $nid, false);
@@ -555,7 +567,7 @@ function pm_snapshot(PDO $db, int $pid): array
 function pm_restore(PDO $db, int $pid, array $snap): void
 {
     $cols = ['id', 'project_id', 'parent_id', 'kind', 'title', 'summary', 'details', 'inputs', 'outputs', 'process', 'tech', 'priority', 'status', 'progress', 'est_days', 'final_days',
-        'start_date', 'done_date', 'assignee', 'tags', 'sort', 'created_at', 'updated_at', 'x', 'y', 'color', 'icon', 'flow', 'work_seconds', 'src_id', 'src_name'];
+        'start_date', 'done_date', 'assignee', 'tags', 'sort', 'created_at', 'updated_at', 'x', 'y', 'color', 'icon', 'flow', 'work_seconds', 'src_id', 'src_name', 'code_lang', 'code', 'category'];
     $keep = [];
     foreach ($snap['nodes'] ?? [] as $n) $keep[(int)$n['id']] = true;
     $cur = $db->prepare('SELECT id FROM nodes WHERE project_id=?');
@@ -593,7 +605,7 @@ function pm_restore(PDO $db, int $pid, array $snap): void
 }
 
 const PM_FIELD_LABELS = ['title' => 'عنوان', 'kind' => 'نوع', 'summary' => 'خلاصه', 'details' => 'توضیحات', 'inputs' => 'ورودی‌ها', 'outputs' => 'خروجی‌ها', 'process' => 'پردازش',
-    'tech' => 'نکات فنی', 'priority' => 'اولویت', 'status' => 'وضعیت', 'progress' => 'درصد انجام', 'est_days' => 'برآورد', 'final_days' => 'زمان نهایی', 'start_date' => 'تاریخ شروع',
+    'tech' => 'نکات فنی', 'code_lang' => 'زبانِ کدِ نمونه', 'code' => 'کدِ نمونه', 'category' => 'دسته', 'priority' => 'اولویت', 'status' => 'وضعیت', 'progress' => 'درصد انجام', 'est_days' => 'برآورد', 'final_days' => 'زمان نهایی', 'start_date' => 'تاریخ شروع',
     'assignee' => 'مسئول', 'tags' => 'برچسب‌ها', 'color' => 'رنگ', 'icon' => 'آیکن', 'flow' => 'فلوچارت', 'parent_id' => 'جایگاه'];
 
 /** پس از ایمپورت: نوعِ هر بخش را با قواعدِ سلسله‌مراتب هم‌خوان می‌کند (و «کار» را تک‌ورودی/تک‌خروجی). */

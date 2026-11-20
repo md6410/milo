@@ -362,3 +362,4 @@ table.t th{top:90px}
 .cvp:hover{background:#e0912b;transform:translate(-50%,-50%) scale(1.5)}
 
 input,textarea{text-align:start}
+textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;font-size:12.5px;line-height:1.55;direction:ltr;text-align:left;min-height:160px;tab-size:4;white-space:pre;overflow:auto}
